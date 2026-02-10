@@ -6,7 +6,7 @@ import requests
 
 # --- 1. Google Apps Script 設定 ---
 # 這是你專屬的 API 網址 (已經幫你填好了)
-GAS_URL = "https://script.google.com/macros/s/AKfycbzrtQuZBlNAdHDEhOwN10wpmqR1YH-RBJIAYoRVisbz55x2kF4zQ9JOcYuD8R7P-W1BxQ/exec"
+GAS_URL = "https://script.google.com/macros/s/AKfycbxbRhj557u8nwTMR6uyYQsUAaAVldnlOHHrBJHKMrai9zuVURxqw7GcoFJY-S1Ct3Tsxw/exec"
 
 def load_portfolio():
     try:
