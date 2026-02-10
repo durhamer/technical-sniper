@@ -5,12 +5,10 @@ import plotly.graph_objects as go
 import requests
 
 # --- 1. Google Apps Script 設定 ---
-# 這是你專屬的 API 網址 (已經幫你填好了)
 GAS_URL = "https://script.google.com/macros/s/AKfycbxbRhj557u8nwTMR6uyYQsUAaAVldnlOHHrBJHKMrai9zuVURxqw7GcoFJY-S1Ct3Tsxw/exec"
 
 def load_portfolio():
     try:
-        # 發送 GET 請求讀取資料
         response = requests.get(GAS_URL)
         data = response.json()
         df = pd.DataFrame(data)
@@ -18,41 +16,31 @@ def load_portfolio():
         if df.empty:
              return pd.DataFrame(columns=['Ticker', 'Cost', 'Type', 'Note'])
              
-        # 強制轉型
         df['Cost'] = pd.to_numeric(df['Cost'], errors='coerce').fillna(0.0)
         return df
     except Exception as e:
-        # 如果發生錯誤，顯示空表格
         return pd.DataFrame(columns=['Ticker', 'Cost', 'Type', 'Note'])
 
 def save_portfolio(df):
     try:
-        # 準備資料
         header = df.columns.tolist()
         values = df.values.tolist()
-        # 注意：fillna 確保沒有 NaN 傳給 JSON，否則會報錯
         values = [[str(x) if pd.isna(x) else x for x in row] for row in values]
         
         payload = {'data': [header] + values}
         
-        # 發送請求
         response = requests.post(GAS_URL, json=payload)
         
-        # 解析 Google 回傳的訊息
         try:
             result = response.json()
         except:
-            # 如果回傳的不是 JSON (例如 HTML 錯誤頁面)
-            st.error(f"❌ 嚴重錯誤：Google 回傳了無法解析的內容。內容摘要：{response.text[:100]}")
+            st.error(f"❌ 嚴重錯誤：Google 回傳了無法解析的內容。")
             return
 
-        # 檢查邏輯狀態
         if result.get('status') == 'success':
             st.toast("✅ 雲端寫入成功！", icon="☁️")
         else:
-            # 這裡會顯示真正的錯誤原因 (例如 Sheet1 找不到)
             st.error(f"❌ 寫入失敗 (GAS Error)：{result.get('message')}")
-            # 停止執行，避免無限迴圈
             st.stop()
              
     except Exception as e:
@@ -71,7 +59,6 @@ def get_stock_data(ticker, period="1y"):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         df = df.reset_index()
-        # 技術指標
         df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
         df['EMA_200'] = df['Close'].ewm(span=200, adjust=False).mean()
@@ -83,7 +70,7 @@ def get_stock_data(ticker, period="1y"):
 tab1, tab2 = st.tabs(["📊 戰術看板", "📝 庫存管理"])
 
 # ==========================================
-# TAB 2: 庫存管理 (編輯器)
+# TAB 2: 庫存管理
 # ==========================================
 with tab2:
     st.markdown("### ☁️ 雲端庫存管理")
@@ -112,15 +99,18 @@ with tab2:
         st.rerun()
 
 # ==========================================
-# TAB 1: 戰術看板 (圖表)
+# TAB 1: 戰術看板 (這裡就是你之前缺失的引擎！)
 # ==========================================
 with tab1:
     portfolio_df = load_portfolio()
     
+    # 預設變數，防止未選擇時報錯
+    selected_ticker = None
+    time_range = "1y" 
+
     with st.sidebar:
         st.header("🔭 戰術導航")
         
-        # 篩選器
         filter_type = st.radio("模式", ["全部", "💰 持倉", "👀 關注"])
         
         if filter_type == "💰 持倉":
@@ -130,7 +120,6 @@ with tab1:
         else:
             filtered_df = portfolio_df
             
-        # 選擇股票
         if not filtered_df.empty:
             select_options = filtered_df.apply(
                 lambda x: f"{x['Ticker']} {'($' + str(x['Cost']) + ')' if x['Cost'] > 0 else ''}", axis=1
@@ -139,7 +128,6 @@ with tab1:
             selected_label = st.selectbox("選擇標的", select_options)
             selected_ticker = selected_label.split(' ')[0]
             
-            # 抓取對應資訊
             row = portfolio_df[portfolio_df['Ticker'] == selected_ticker].iloc[0]
             cost_basis = row['Cost'] if row['Cost'] > 0 else None
             note = row.get('Note', '')
@@ -147,3 +135,50 @@ with tab1:
             st.divider()
             if note:
                 st.caption(f"📝 筆記: {note}")
+            
+            # 這是你之前漏掉的控制項
+            time_range = st.select_slider("K線範圍", options=["3mo", "6mo", "1y", "3y", "5y"], value="1y")
+
+    # 這是你之前完全漏掉的繪圖邏輯
+    if selected_ticker:
+        df = get_stock_data(selected_ticker, time_range)
+        
+        if df is not None:
+            latest = df.iloc[-1]
+            prev = df.iloc[-2]
+            price = latest['Close']
+            change = price - prev['Close']
+            pct_change = (change / prev['Close']) * 100
+            
+            # 上方資訊卡
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric(selected_ticker, f"{price:.2f}", f"{change:.2f} ({pct_change:.2f}%)")
+            
+            if cost_basis:
+                pl = price - cost_basis
+                pl_pct = (pl / cost_basis) * 100
+                c2.metric("損益", f"{pl_pct:+.2f}%", f"{pl:+.2f}", delta_color="normal" if pl > 0 else "inverse")
+            else:
+                c2.metric("狀態", "觀察中 👀")
+            
+            c3.metric("EMA 20", f"{latest['EMA_20']:.2f}")
+            c4.metric("EMA 50", f"{latest['EMA_50']:.2f}")
+            
+            # 繪圖
+            fig = go.Figure()
+            fig.add_trace(go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Price"))
+            
+            if cost_basis:
+                fig.add_hline(y=cost_basis, line_dash="dash", line_color="yellow", annotation_text="COST")
+                
+            fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_20'], name="EMA 20", line=dict(color='#00FF00', width=1.5)))
+            fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_50'], name="EMA 50", line=dict(color='#FFA500', width=1.5)))
+            fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_200'], name="EMA 200", line=dict(color='#FF0000', width=1.5)))
+
+            fig.update_layout(height=650, hovermode="x unified", template="plotly_dark", xaxis_rangeslider_visible=False, title=f"{selected_ticker} 技術分析")
+            st.plotly_chart(fig, use_container_width=True)
+            
+        else:
+            st.error("無法讀取數據，請檢查代碼。")
+    else:
+        st.info("👈 資料庫是空的，請先到「庫存管理」分頁新增股票！")
