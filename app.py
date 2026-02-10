@@ -27,16 +27,37 @@ def load_portfolio():
 
 def save_portfolio(df):
     try:
-        # 準備要上傳的資料：標題 + 內容
+        # 準備資料
         header = df.columns.tolist()
         values = df.values.tolist()
+        # 注意：fillna 確保沒有 NaN 傳給 JSON，否則會報錯
+        values = [[str(x) if pd.isna(x) else x for x in row] for row in values]
+        
         payload = {'data': [header] + values}
         
-        # 發送 POST 請求寫入資料
-        requests.post(GAS_URL, json=payload)
+        # 發送請求
+        response = requests.post(GAS_URL, json=payload)
+        
+        # 解析 Google 回傳的訊息
+        try:
+            result = response.json()
+        except:
+            # 如果回傳的不是 JSON (例如 HTML 錯誤頁面)
+            st.error(f"❌ 嚴重錯誤：Google 回傳了無法解析的內容。內容摘要：{response.text[:100]}")
+            return
+
+        # 檢查邏輯狀態
+        if result.get('status') == 'success':
+            st.toast("✅ 雲端寫入成功！", icon="☁️")
+        else:
+            # 這裡會顯示真正的錯誤原因 (例如 Sheet1 找不到)
+            st.error(f"❌ 寫入失敗 (GAS Error)：{result.get('message')}")
+            # 停止執行，避免無限迴圈
+            st.stop()
              
     except Exception as e:
-        st.error(f"❌ 無法寫入 Google Sheet: {e}")
+        st.error(f"❌ 連線錯誤: {e}")
+        st.stop()
 
 # --- 2. 頁面設定 ---
 st.set_page_config(page_title="戰術狙擊鏡 v5.0", layout="wide")
