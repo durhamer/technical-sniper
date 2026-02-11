@@ -2,7 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots # 新增：用來畫雙層圖表
+from plotly.subplots import make_subplots
 import requests
 
 # --- 1. Google Apps Script 設定 ---
@@ -49,25 +49,43 @@ def save_portfolio(df):
         st.stop()
 
 # --- 2. 頁面設定 ---
-st.set_page_config(page_title="戰術狙擊鏡 v6.0 (MACD)", layout="wide")
+st.set_page_config(page_title="戰術狙擊鏡 v6.1 (Fix)", layout="wide")
 st.title("🦅 戰術狙擊鏡 (Pro Edition)")
 
-# --- 3. 數據核心 ---
+# --- 3. 數據核心 (升級版) ---
 @st.cache_data(ttl=300)
 def get_stock_data(ticker, period="1y"):
+    # --- 1. 智能代碼映射 (Auto-Mapping) ---
+    # 幫你把常見的簡寫自動轉成 Yahoo Finance 看得懂的代碼
+    mapping = {
+        "SOX": "^SOX",    # 費半
+        "NDX": "^NDX",    #那斯達克100
+        "DJI": "^DJI",    # 道瓊
+        "GSPC": "^GSPC",  # 標普500
+        "VIX": "^VIX",    # 恐慌指數
+        "BTC": "BTC-USD", # 比特幣
+        "ETH": "ETH-USD"  # 以太幣
+    }
+    # 如果輸入的代碼在清單裡，就自動替換；否則維持原樣
+    target_ticker = mapping.get(ticker.upper(), ticker)
+
     try:
-        df = yf.download(ticker, period=period, progress=False)
+        df = yf.download(target_ticker, period=period, progress=False)
+        
+        # 檢查是否抓到空資料 (關鍵修復！)
+        if df.empty:
+            return None
+
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         df = df.reset_index()
         
         # --- 技術指標計算 ---
-        # 1. EMA
         df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
         df['EMA_200'] = df['Close'].ewm(span=200, adjust=False).mean()
         
-        # 2. MACD (12, 26, 9)
+        # MACD
         exp1 = df['Close'].ewm(span=12, adjust=False).mean()
         exp2 = df['Close'].ewm(span=26, adjust=False).mean()
         df['MACD'] = exp1 - exp2
@@ -75,7 +93,8 @@ def get_stock_data(ticker, period="1y"):
         df['Hist'] = df['MACD'] - df['Signal']
         
         return df
-    except:
+    except Exception as e:
+        print(f"Error fetching data: {e}")
         return None
 
 # --- 4. 主介面邏輯 ---
@@ -151,7 +170,8 @@ with tab1:
     if selected_ticker:
         df = get_stock_data(selected_ticker, time_range)
         
-        if df is not None:
+        # 這裡加了防護網：必須 df 存在且不是空的，才執行繪圖
+        if df is not None and not df.empty:
             latest = df.iloc[-1]
             prev = df.iloc[-2]
             price = latest['Close']
@@ -172,8 +192,7 @@ with tab1:
             c3.metric("EMA 20", f"{latest['EMA_20']:.2f}")
             c4.metric("EMA 50", f"{latest['EMA_50']:.2f}")
             
-            # --- 建立雙層圖表 (Subplots) ---
-            # row_heights=[0.7, 0.3] 代表上面佔 70%，下面佔 30%
+            # --- 建立雙層圖表 ---
             fig = make_subplots(
                 rows=2, cols=1, 
                 shared_xaxes=True, 
@@ -182,50 +201,34 @@ with tab1:
                 subplot_titles=(f"{selected_ticker} Price", "MACD")
             )
 
-            # --- Row 1: 主圖 (K線 + EMA + 成本) ---
+            # Row 1
             fig.add_trace(go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
-            
             if cost_basis:
                 fig.add_hline(y=cost_basis, line_dash="dash", line_color="yellow", annotation_text="COST", row=1, col=1)
-                
             fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_20'], name="EMA 20", line=dict(color='#00FF00', width=1.5)), row=1, col=1)
             fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_50'], name="EMA 50", line=dict(color='#FFA500', width=1.5)), row=1, col=1)
             fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_200'], name="EMA 200", line=dict(color='#FF0000', width=1.5)), row=1, col=1)
 
-            # --- Row 2: MACD (柱狀 + 快慢線) ---
-            # 1. 柱狀圖 (Histogram) - 根據正負變色
+            # Row 2
             colors = ['#00FF00' if v >= 0 else '#FF0000' for v in df['Hist']]
             fig.add_trace(go.Bar(x=df['Date'], y=df['Hist'], name="Histogram", marker_color=colors), row=2, col=1)
-            
-            # 2. 快線 (MACD Line)
             fig.add_trace(go.Scatter(x=df['Date'], y=df['MACD'], name="MACD", line=dict(color='#00FFFF', width=1.5)), row=2, col=1)
-            
-            # 3. 慢線 (Signal Line)
             fig.add_trace(go.Scatter(x=df['Date'], y=df['Signal'], name="Signal", line=dict(color='#FF00FF', width=1.5)), row=2, col=1)
 
-            # --- 更新佈局 ---
             fig.update_layout(
-                height=800, # 拉高一點，因為有兩層
+                height=800,
                 hovermode="x unified",
                 template="plotly_dark",
                 xaxis_rangeslider_visible=False,
-                
-                # 圖例
                 legend=dict(x=0, y=1, xanchor="left", yanchor="top", bgcolor='rgba(0,0,0,0.3)'),
-                
-                # 主圖 Y軸 (Row 1) -> 放在右邊
                 yaxis1=dict(side="right", showspikes=True, spikemode='across', spikesnap='cursor', showline=True, showticklabels=True),
-                
-                # 副圖 Y軸 (Row 2) -> 也放在右邊
                 yaxis2=dict(side="right", showline=True, showticklabels=True)
             )
-            
-            # 移除副圖的 Range Slider (Plotly 有時會預設開啟)
             fig.update_xaxes(rangeslider_visible=False)
-            
             st.plotly_chart(fig, use_container_width=True)
             
         else:
-            st.error("無法讀取數據，請檢查代碼。")
+            # 這裡就是防呆機制
+            st.warning(f"⚠️ 找不到 **{selected_ticker}** 的數據。如果是指數，試試看加上 `^` (例如 `^SOX`)，或者檢查代碼是否正確。")
     else:
-        st.info("👈 資料庫是空的，請先到「庫存管理」分頁新增股票！")
+        st.info("👈 請先選擇股票！")
