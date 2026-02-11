@@ -48,7 +48,7 @@ def save_portfolio(df):
         st.stop()
 
 # --- 2. 頁面設定 ---
-st.set_page_config(page_title="戰術狙擊鏡 v5.0", layout="wide")
+st.set_page_config(page_title="戰術狙擊鏡 v5.1", layout="wide")
 st.title("🦅 戰術狙擊鏡 (Cloud Database)")
 
 # --- 3. 數據核心 ---
@@ -99,12 +99,11 @@ with tab2:
         st.rerun()
 
 # ==========================================
-# TAB 1: 戰術看板 (這裡就是你之前缺失的引擎！)
+# TAB 1: 戰術看板
 # ==========================================
 with tab1:
     portfolio_df = load_portfolio()
     
-    # 預設變數，防止未選擇時報錯
     selected_ticker = None
     time_range = "1y" 
 
@@ -136,10 +135,8 @@ with tab1:
             if note:
                 st.caption(f"📝 筆記: {note}")
             
-            # 這是你之前漏掉的控制項
             time_range = st.select_slider("K線範圍", options=["3mo", "6mo", "1y", "3y", "5y"], value="1y")
 
-    # 這是你之前完全漏掉的繪圖邏輯
     if selected_ticker:
         df = get_stock_data(selected_ticker, time_range)
         
@@ -175,7 +172,31 @@ with tab1:
             fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_50'], name="EMA 50", line=dict(color='#FFA500', width=1.5)))
             fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_200'], name="EMA 200", line=dict(color='#FF0000', width=1.5)))
 
-            fig.update_layout(height=650, hovermode="x unified", template="plotly_dark", xaxis_rangeslider_visible=False, title=f"{selected_ticker} 技術分析")
+            # --- 更新圖表佈局 ---
+            fig.update_layout(
+                height=650,
+                hovermode="x unified",
+                template="plotly_dark",
+                xaxis_rangeslider_visible=False,
+                title=f"{selected_ticker} 技術分析",
+                # 1. Y軸設定：移到右側，並顯示十字準線標籤
+                yaxis=dict(
+                    side="right",       # 標籤在右邊
+                    showspikes=True,    # 顯示追踪線
+                    spikemode='across', # 橫跨模式
+                    spikesnap='cursor', # 黏附游標
+                    showline=True,
+                    showticklabels=True
+                ),
+                # 2. 圖例設定：移到左上角
+                legend=dict(
+                    x=0,
+                    y=1,
+                    xanchor="left",
+                    yanchor="top",
+                    bgcolor='rgba(0,0,0,0.3)' # 增加一點半透明背景，避免文字看不清
+                )
+            )
             st.plotly_chart(fig, use_container_width=True)
             
         else:
