@@ -49,38 +49,27 @@ def save_portfolio(df):
         st.stop()
 
 # --- 2. 頁面設定 ---
-st.set_page_config(page_title="戰術狙擊鏡 v6.1 (Fix)", layout="wide")
+st.set_page_config(page_title="戰術狙擊鏡 v6.2 (Intel)", layout="wide")
 st.title("🦅 戰術狙擊鏡 (Pro Edition)")
 
-# --- 3. 數據核心 (升級版) ---
+# --- 3. 數據核心 ---
 @st.cache_data(ttl=300)
 def get_stock_data(ticker, period="1y"):
-    # --- 1. 智能代碼映射 (Auto-Mapping) ---
-    # 幫你把常見的簡寫自動轉成 Yahoo Finance 看得懂的代碼
     mapping = {
-        "SOX": "^SOX",    # 費半
-        "NDX": "^NDX",    #那斯達克100
-        "DJI": "^DJI",    # 道瓊
-        "GSPC": "^GSPC",  # 標普500
-        "VIX": "^VIX",    # 恐慌指數
-        "BTC": "BTC-USD", # 比特幣
-        "ETH": "ETH-USD"  # 以太幣
+        "SOX": "^SOX", "NDX": "^NDX", "DJI": "^DJI", "GSPC": "^GSPC", 
+        "VIX": "^VIX", "BTC": "BTC-USD", "ETH": "ETH-USD"
     }
-    # 如果輸入的代碼在清單裡，就自動替換；否則維持原樣
     target_ticker = mapping.get(ticker.upper(), ticker)
 
     try:
         df = yf.download(target_ticker, period=period, progress=False)
-        
-        # 檢查是否抓到空資料 (關鍵修復！)
-        if df.empty:
-            return None
+        if df.empty: return None
 
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         df = df.reset_index()
         
-        # --- 技術指標計算 ---
+        # EMA
         df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
         df['EMA_200'] = df['Close'].ewm(span=200, adjust=False).mean()
@@ -94,7 +83,6 @@ def get_stock_data(ticker, period="1y"):
         
         return df
     except Exception as e:
-        print(f"Error fetching data: {e}")
         return None
 
 # --- 4. 主介面邏輯 ---
@@ -166,11 +154,15 @@ with tab1:
                 st.caption(f"📝 筆記: {note}")
             
             time_range = st.select_slider("K線範圍", options=["3mo", "6mo", "1y", "3y", "5y"], value="1y")
+            
+            # --- 新增：外部情報連結 ---
+            st.divider()
+            st.markdown("### 🕵️‍♂️ 外部情報")
+            st.link_button("📊 查看 DIX / GEX (暗池)", "https://squeezemetrics.com/monitor/dix", help="前往 SqueezeMetrics 查看暗池指標")
 
     if selected_ticker:
         df = get_stock_data(selected_ticker, time_range)
         
-        # 這裡加了防護網：必須 df 存在且不是空的，才執行繪圖
         if df is not None and not df.empty:
             latest = df.iloc[-1]
             prev = df.iloc[-2]
@@ -178,7 +170,6 @@ with tab1:
             change = price - prev['Close']
             pct_change = (change / prev['Close']) * 100
             
-            # 上方資訊卡
             c1, c2, c3, c4 = st.columns(4)
             c1.metric(selected_ticker, f"{price:.2f}", f"{change:.2f} ({pct_change:.2f}%)")
             
@@ -192,7 +183,6 @@ with tab1:
             c3.metric("EMA 20", f"{latest['EMA_20']:.2f}")
             c4.metric("EMA 50", f"{latest['EMA_50']:.2f}")
             
-            # --- 建立雙層圖表 ---
             fig = make_subplots(
                 rows=2, cols=1, 
                 shared_xaxes=True, 
@@ -228,7 +218,6 @@ with tab1:
             st.plotly_chart(fig, use_container_width=True)
             
         else:
-            # 這裡就是防呆機制
-            st.warning(f"⚠️ 找不到 **{selected_ticker}** 的數據。如果是指數，試試看加上 `^` (例如 `^SOX`)，或者檢查代碼是否正確。")
+            st.warning(f"⚠️ 找不到 **{selected_ticker}** 的數據。如果是指數，試試看加上 `^` (例如 `^SOX`)。")
     else:
         st.info("👈 請先選擇股票！")
