@@ -2,6 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots # 新增：用來畫雙層圖表
 import requests
 
 # --- 1. Google Apps Script 設定 ---
@@ -48,8 +49,8 @@ def save_portfolio(df):
         st.stop()
 
 # --- 2. 頁面設定 ---
-st.set_page_config(page_title="戰術狙擊鏡 v5.1", layout="wide")
-st.title("🦅 戰術狙擊鏡 (Cloud Database)")
+st.set_page_config(page_title="戰術狙擊鏡 v6.0 (MACD)", layout="wide")
+st.title("🦅 戰術狙擊鏡 (Pro Edition)")
 
 # --- 3. 數據核心 ---
 @st.cache_data(ttl=300)
@@ -59,9 +60,20 @@ def get_stock_data(ticker, period="1y"):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         df = df.reset_index()
+        
+        # --- 技術指標計算 ---
+        # 1. EMA
         df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
         df['EMA_200'] = df['Close'].ewm(span=200, adjust=False).mean()
+        
+        # 2. MACD (12, 26, 9)
+        exp1 = df['Close'].ewm(span=12, adjust=False).mean()
+        exp2 = df['Close'].ewm(span=26, adjust=False).mean()
+        df['MACD'] = exp1 - exp2
+        df['Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+        df['Hist'] = df['MACD'] - df['Signal']
+        
         return df
     except:
         return None
@@ -75,7 +87,6 @@ tab1, tab2 = st.tabs(["📊 戰術看板", "📝 庫存管理"])
 with tab2:
     st.markdown("### ☁️ 雲端庫存管理")
     st.caption("Backend: Google Sheets (via Apps Script)")
-    st.info("💡 **操作指南：** 修改表格內容後（例如新增股票、更改成本），系統會自動同步回 Google Drive。")
     
     current_df = load_portfolio()
     
@@ -161,42 +172,57 @@ with tab1:
             c3.metric("EMA 20", f"{latest['EMA_20']:.2f}")
             c4.metric("EMA 50", f"{latest['EMA_50']:.2f}")
             
-            # 繪圖
-            fig = go.Figure()
-            fig.add_trace(go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Price"))
+            # --- 建立雙層圖表 (Subplots) ---
+            # row_heights=[0.7, 0.3] 代表上面佔 70%，下面佔 30%
+            fig = make_subplots(
+                rows=2, cols=1, 
+                shared_xaxes=True, 
+                vertical_spacing=0.03, 
+                row_heights=[0.7, 0.3],
+                subplot_titles=(f"{selected_ticker} Price", "MACD")
+            )
+
+            # --- Row 1: 主圖 (K線 + EMA + 成本) ---
+            fig.add_trace(go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
             
             if cost_basis:
-                fig.add_hline(y=cost_basis, line_dash="dash", line_color="yellow", annotation_text="COST")
+                fig.add_hline(y=cost_basis, line_dash="dash", line_color="yellow", annotation_text="COST", row=1, col=1)
                 
-            fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_20'], name="EMA 20", line=dict(color='#00FF00', width=1.5)))
-            fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_50'], name="EMA 50", line=dict(color='#FFA500', width=1.5)))
-            fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_200'], name="EMA 200", line=dict(color='#FF0000', width=1.5)))
+            fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_20'], name="EMA 20", line=dict(color='#00FF00', width=1.5)), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_50'], name="EMA 50", line=dict(color='#FFA500', width=1.5)), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_200'], name="EMA 200", line=dict(color='#FF0000', width=1.5)), row=1, col=1)
 
-            # --- 更新圖表佈局 ---
+            # --- Row 2: MACD (柱狀 + 快慢線) ---
+            # 1. 柱狀圖 (Histogram) - 根據正負變色
+            colors = ['#00FF00' if v >= 0 else '#FF0000' for v in df['Hist']]
+            fig.add_trace(go.Bar(x=df['Date'], y=df['Hist'], name="Histogram", marker_color=colors), row=2, col=1)
+            
+            # 2. 快線 (MACD Line)
+            fig.add_trace(go.Scatter(x=df['Date'], y=df['MACD'], name="MACD", line=dict(color='#00FFFF', width=1.5)), row=2, col=1)
+            
+            # 3. 慢線 (Signal Line)
+            fig.add_trace(go.Scatter(x=df['Date'], y=df['Signal'], name="Signal", line=dict(color='#FF00FF', width=1.5)), row=2, col=1)
+
+            # --- 更新佈局 ---
             fig.update_layout(
-                height=650,
+                height=800, # 拉高一點，因為有兩層
                 hovermode="x unified",
                 template="plotly_dark",
                 xaxis_rangeslider_visible=False,
-                title=f"{selected_ticker} 技術分析",
-                # 1. Y軸設定：移到右側，並顯示十字準線標籤
-                yaxis=dict(
-                    side="right",       # 標籤在右邊
-                    showspikes=True,    # 顯示追踪線
-                    spikemode='across', # 橫跨模式
-                    spikesnap='cursor', # 黏附游標
-                    showline=True,
-                    showticklabels=True
-                ),
-                # 2. 圖例設定：移到左上角
-                legend=dict(
-                    x=0,
-                    y=1,
-                    xanchor="left",
-                    yanchor="top",
-                    bgcolor='rgba(0,0,0,0.3)' # 增加一點半透明背景，避免文字看不清
-                )
+                
+                # 圖例
+                legend=dict(x=0, y=1, xanchor="left", yanchor="top", bgcolor='rgba(0,0,0,0.3)'),
+                
+                # 主圖 Y軸 (Row 1) -> 放在右邊
+                yaxis1=dict(side="right", showspikes=True, spikemode='across', spikesnap='cursor', showline=True, showticklabels=True),
+                
+                # 副圖 Y軸 (Row 2) -> 也放在右邊
+                yaxis2=dict(side="right", showline=True, showticklabels=True)
             )
+            
+            # 移除副圖的 Range Slider (Plotly 有時會預設開啟)
+            fig.update_xaxes(rangeslider_visible=False)
+            
             st.plotly_chart(fig, use_container_width=True)
             
         else:
