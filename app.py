@@ -4,6 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import requests
+from datetime import datetime, timedelta
 
 # --- 1. Google Apps Script 設定 ---
 GAS_URL = "https://script.google.com/macros/s/AKfycbxbRhj557u8nwTMR6uyYQsUAaAVldnlOHHrBJHKMrai9zuVURxqw7GcoFJY-S1Ct3Tsxw/exec"
@@ -49,7 +50,7 @@ def save_portfolio(df):
         st.stop()
 
 # --- 2. 頁面設定 ---
-st.set_page_config(page_title="戰術狙擊鏡 v6.2 (Intel)", layout="wide")
+st.set_page_config(page_title="戰術狙擊鏡 v7.0 (Buyback)", layout="wide")
 st.title("🦅 戰術狙擊鏡 (Pro Edition)")
 
 # --- 3. 數據核心 ---
@@ -84,6 +85,40 @@ def get_stock_data(ticker, period="1y"):
         return df
     except Exception as e:
         return None
+
+@st.cache_data(ttl=86400) # 這些數據更新頻率低，cache 久一點
+def get_shares_data(ticker):
+    """
+    獲取流通股數歷史數據，用於判斷回購力道
+    """
+    if "^" in ticker or "USD" in ticker: return None, None # 排除指數和加密貨幣
+
+    try:
+        tk = yf.Ticker(ticker)
+        # 獲取股數歷史 (yf 現在有 get_shares_full)
+        shares = tk.get_shares_full(start="2020-01-01")
+        
+        if shares is None or shares.empty:
+            return None, None
+
+        # 整理數據
+        shares_df = pd.DataFrame(shares, columns=['Shares'])
+        shares_df.index = pd.to_datetime(shares_df.index)
+        shares_df = shares_df.sort_index()
+        
+        # 計算 YoY 變化
+        latest_shares = shares_df['Shares'].iloc[-1]
+        
+        # 找一年前的股數
+        one_year_ago = datetime.now() - timedelta(days=365)
+        idx = shares_df.index.get_indexer([one_year_ago], method='nearest')[0]
+        prev_shares = shares_df['Shares'].iloc[idx]
+        
+        yoy_change = ((latest_shares - prev_shares) / prev_shares) * 100
+        
+        return shares_df, yoy_change
+    except Exception as e:
+        return None, None
 
 # --- 4. 主介面邏輯 ---
 tab1, tab2 = st.tabs(["📊 戰術看板", "📝 庫存管理"])
@@ -155,13 +190,16 @@ with tab1:
             
             time_range = st.select_slider("K線範圍", options=["3mo", "6mo", "1y", "3y", "5y"], value="1y")
             
-            # --- 新增：外部情報連結 ---
             st.divider()
             st.markdown("### 🕵️‍♂️ 外部情報")
             st.link_button("📊 查看 DIX / GEX (暗池)", "https://squeezemetrics.com/monitor/dix", help="前往 SqueezeMetrics 查看暗池指標")
 
     if selected_ticker:
+        # 1. 取得價格數據
         df = get_stock_data(selected_ticker, time_range)
+        
+        # 2. 取得回購數據
+        shares_df, shares_yoy = get_shares_data(selected_ticker)
         
         if df is not None and not df.empty:
             latest = df.iloc[-1]
@@ -170,6 +208,7 @@ with tab1:
             change = price - prev['Close']
             pct_change = (change / prev['Close']) * 100
             
+            # --- 頂部指標區 ---
             c1, c2, c3, c4 = st.columns(4)
             c1.metric(selected_ticker, f"{price:.2f}", f"{change:.2f} ({pct_change:.2f}%)")
             
@@ -180,18 +219,27 @@ with tab1:
             else:
                 c2.metric("狀態", "觀察中 👀")
             
-            c3.metric("EMA 20", f"{latest['EMA_20']:.2f}")
-            c4.metric("EMA 50", f"{latest['EMA_50']:.2f}")
+            # 回購指標顯示
+            if shares_yoy is not None:
+                # 負數代表股數減少（好事），用綠色；正數代表稀釋（壞事），用紅色 (inverse)
+                delta_color = "normal" if shares_yoy < 0 else "inverse" 
+                trend_text = "縮減 (回購)" if shares_yoy < 0 else "增加 (稀釋)"
+                c3.metric("流通股數 YoY", f"{shares_yoy:.2f}%", trend_text, delta_color=delta_color)
+            else:
+                c3.metric("流通股數", "N/A", "無法取得")
+
+            c4.metric("EMA 20", f"{latest['EMA_20']:.2f}")
             
+            # --- 主圖表區 ---
             fig = make_subplots(
                 rows=2, cols=1, 
                 shared_xaxes=True, 
                 vertical_spacing=0.03, 
                 row_heights=[0.7, 0.3],
-                subplot_titles=(f"{selected_ticker} Price", "MACD")
+                subplot_titles=(f"{selected_ticker} Price Action", "MACD Momentum")
             )
 
-            # Row 1
+            # Row 1: Price
             fig.add_trace(go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
             if cost_basis:
                 fig.add_hline(y=cost_basis, line_dash="dash", line_color="yellow", annotation_text="COST", row=1, col=1)
@@ -199,25 +247,65 @@ with tab1:
             fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_50'], name="EMA 50", line=dict(color='#FFA500', width=1.5)), row=1, col=1)
             fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_200'], name="EMA 200", line=dict(color='#FF0000', width=1.5)), row=1, col=1)
 
-            # Row 2
+            # Row 2: MACD
             colors = ['#00FF00' if v >= 0 else '#FF0000' for v in df['Hist']]
             fig.add_trace(go.Bar(x=df['Date'], y=df['Hist'], name="Histogram", marker_color=colors), row=2, col=1)
             fig.add_trace(go.Scatter(x=df['Date'], y=df['MACD'], name="MACD", line=dict(color='#00FFFF', width=1.5)), row=2, col=1)
             fig.add_trace(go.Scatter(x=df['Date'], y=df['Signal'], name="Signal", line=dict(color='#FF00FF', width=1.5)), row=2, col=1)
 
             fig.update_layout(
-                height=800,
+                height=700,
                 hovermode="x unified",
                 template="plotly_dark",
                 xaxis_rangeslider_visible=False,
                 legend=dict(x=0, y=1, xanchor="left", yanchor="top", bgcolor='rgba(0,0,0,0.3)'),
-                yaxis1=dict(side="right", showspikes=True, spikemode='across', spikesnap='cursor', showline=True, showticklabels=True),
-                yaxis2=dict(side="right", showline=True, showticklabels=True)
+                yaxis1=dict(side="right", showline=True),
+                yaxis2=dict(side="right", showline=True)
             )
-            fig.update_xaxes(rangeslider_visible=False)
             st.plotly_chart(fig, use_container_width=True)
             
+            # --- 隱藏式：回購深入分析 (The Sniper View) ---
+            if shares_df is not None:
+                with st.expander("🛡️ 護城河偵測：回購與股權分析 (Buyback Analysis)", expanded=False):
+                    st.caption("觀察重點：橘色線（股數）是否持續下降？如果是，代表公司正在透過回購為股價提供支撐。")
+                    
+                    # 建立雙軸圖表
+                    fig_buyback = make_subplots(specs=[[{"secondary_y": True}]])
+                    
+                    # 軸1：股價 (K線的收盤價) - 為了對齊時間，我們需要 filter
+                    # 這裡簡單起見，我們畫 Price Line
+                    fig_buyback.add_trace(
+                        go.Scatter(x=df['Date'], y=df['Close'], name="股價 (Price)", line=dict(color='#00FFFF', width=2)),
+                        secondary_y=False
+                    )
+                    
+                    # 軸2：流通股數 (Area Chart)
+                    fig_buyback.add_trace(
+                        go.Scatter(
+                            x=shares_df.index, 
+                            y=shares_df['Shares'], 
+                            name="流通股數 (Shares Outstanding)", 
+                            fill='tozeroy',
+                            line=dict(color='#FFA500', width=2)
+                        ),
+                        secondary_y=True
+                    )
+                    
+                    fig_buyback.update_layout(
+                        title=f"{selected_ticker} - 股價 vs 流通股數",
+                        template="plotly_dark",
+                        height=400,
+                        hovermode="x unified",
+                        legend=dict(orientation="h", y=1.1)
+                    )
+                    
+                    # 設定軸的名稱
+                    fig_buyback.update_yaxes(title_text="股價 Price", secondary_y=False)
+                    fig_buyback.update_yaxes(title_text="流通股數 Shares", secondary_y=True, showgrid=False) # 關掉右邊grid以免太亂
+
+                    st.plotly_chart(fig_buyback, use_container_width=True)
+            
         else:
-            st.warning(f"⚠️ 找不到 **{selected_ticker}** 的數據。如果是指數，試試看加上 `^` (例如 `^SOX`)。")
+            st.warning(f"⚠️ 找不到 **{selected_ticker}** 的數據。")
     else:
         st.info("👈 請先選擇股票！")
