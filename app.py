@@ -50,7 +50,7 @@ def save_portfolio(df):
         st.stop()
 
 # --- 2. 頁面設定 ---
-st.set_page_config(page_title="戰術狙擊鏡 v7.3 (Earnings)", layout="wide")
+st.set_page_config(page_title="戰術狙擊鏡 v7.4 (UI Optimized)", layout="wide")
 st.title("🦅 戰術狙擊鏡 (Pro Edition)")
 
 # --- 3. 數據核心 ---
@@ -93,7 +93,6 @@ def get_shares_data(ticker):
     try:
         tk = yf.Ticker(ticker)
         
-        # 嘗試從季度資產負債表抓取
         try:
             bs = tk.quarterly_balance_sheet
             if bs.empty:
@@ -112,7 +111,6 @@ def get_shares_data(ticker):
                 shares_df.columns = ['Shares']
                 shares_df.index = pd.to_datetime(shares_df.index)
                 
-                # 計算 YoY
                 if len(shares_df) >= 2:
                     latest = shares_df['Shares'].iloc[-1]
                     if len(shares_df) >= 5:
@@ -125,7 +123,6 @@ def get_shares_data(ticker):
         except:
             pass 
 
-        # 備案: Info
         info = tk.info
         latest_shares = info.get('sharesOutstanding')
         if latest_shares:
@@ -133,28 +130,20 @@ def get_shares_data(ticker):
             
         return None, None
 
-    except Exception as e:
-        # print(f"❌ Error getting shares for {ticker}: {e}")
+    except Exception:
         return None, None
 
 @st.cache_data(ttl=86400)
 def get_earnings_date(ticker):
-    """
-    抓取下一次財報日期
-    """
     if "^" in ticker or "USD" in ticker: return None
     try:
         tk = yf.Ticker(ticker)
         cal = tk.calendar
         
-        # yfinance 的 calendar 有時回傳 dict，有時回傳 dataframe
-        # 通常 key 是 'Earnings Date'，value 是一個 list (可能是預測區間)
         if cal is not None and 'Earnings Date' in cal:
             dates = cal['Earnings Date']
             if isinstance(dates, list) and len(dates) > 0:
-                # 取第一個日期 (通常是區間開始日或確定日)
-                earnings_date = dates[0]
-                return earnings_date
+                return dates[0]
     except:
         pass
     return None
@@ -234,13 +223,8 @@ with tab1:
             st.link_button("📊 查看 DIX / GEX (暗池)", "https://squeezemetrics.com/monitor/dix", help="前往 SqueezeMetrics 查看暗池指標")
 
     if selected_ticker:
-        # 1. 取得價格數據
         df = get_stock_data(selected_ticker, time_range)
-        
-        # 2. 取得回購數據
         shares_df, shares_yoy = get_shares_data(selected_ticker)
-
-        # 3. 取得財報日期 (New Feature)
         earnings_date = get_earnings_date(selected_ticker)
         
         if df is not None and not df.empty:
@@ -250,42 +234,60 @@ with tab1:
             change = price - prev['Close']
             pct_change = (change / prev['Close']) * 100
             
-            # --- 頂部指標區 (改為 5 欄) ---
-            c1, c2, c3, c4, c5 = st.columns(5)
-            c1.metric(selected_ticker, f"{price:.2f}", f"{change:.2f} ({pct_change:.2f}%)")
+            # ---------------------------------------------------------
+            # 🎯 UI 優化：模組化情報卡片 (Intelligence Cards)
+            # ---------------------------------------------------------
+            col_market, col_portfolio, col_intel = st.columns(3)
             
-            if cost_basis:
-                pl = price - cost_basis
-                pl_pct = (pl / cost_basis) * 100
-                c2.metric("損益", f"{pl_pct:+.2f}%", f"{pl:+.2f}", delta_color="normal" if pl > 0 else "inverse")
-            else:
-                c2.metric("狀態", "觀察中 👀")
+            # 卡片 1：行情數據
+            with col_market:
+                with st.container(border=True):
+                    st.markdown("📉 **即時行情**")
+                    m1, m2 = st.columns(2)
+                    m1.metric("現價", f"{price:.2f}", f"{change:.2f} ({pct_change:.2f}%)")
+                    m2.metric("EMA 20", f"{latest['EMA_20']:.2f}")
             
-            # 回購指標顯示
-            if shares_yoy is not None and shares_yoy != 0:
-                delta_color = "normal" if shares_yoy < 0 else "inverse" 
-                trend_text = "縮減 (回購)" if shares_yoy < 0 else "增加 (稀釋)"
-                c3.metric("流通股數 Trend", f"{shares_yoy:.2f}%", trend_text, delta_color=delta_color)
-            elif shares_yoy == 0:
-                 c3.metric("流通股數", "Data OK", "趨勢持平")
-            else:
-                c3.metric("流通股數", "N/A", "無法取得")
+            # 卡片 2：部位狀態
+            with col_portfolio:
+                with st.container(border=True):
+                    st.markdown("💼 **部位狀態**")
+                    if cost_basis:
+                        pl = price - cost_basis
+                        pl_pct = (pl / cost_basis) * 100
+                        st.metric("持倉損益", f"{pl_pct:+.2f}%", f"{pl:+.2f}", delta_color="normal" if pl > 0 else "inverse")
+                    else:
+                        st.metric("目前狀態", "👀 觀察清單", "")
+            
+            # 卡片 3：企業情報
+            with col_intel:
+                with st.container(border=True):
+                    st.markdown("🏢 **企業情報**")
+                    i1, i2 = st.columns(2)
+                    
+                    # 財報處理
+                    if earnings_date:
+                        try:
+                            today = date.today()
+                            days_left = (earnings_date - today).days
+                            i1.metric("下次財報", f"{earnings_date.strftime('%m/%d')}", f"{days_left} 天後" if days_left >= 0 else "剛發布", delta_color="off")
+                        except:
+                            i1.metric("下次財報", f"{earnings_date}")
+                    else:
+                        i1.metric("下次財報", "N/A")
 
-            c4.metric("EMA 20", f"{latest['EMA_20']:.2f}")
+                    # 回購處理
+                    if shares_yoy is not None and shares_yoy != 0:
+                        delta_color = "normal" if shares_yoy < 0 else "inverse" 
+                        trend_text = "縮減" if shares_yoy < 0 else "稀釋"
+                        i2.metric("股本趨勢", f"{shares_yoy:.2f}%", trend_text, delta_color=delta_color)
+                    elif shares_yoy == 0:
+                        i2.metric("股本趨勢", "持平", "")
+                    else:
+                        i2.metric("股本趨勢", "N/A", "")
 
-            # 財報日期顯示
-            if earnings_date:
-                # 簡單計算還有幾天
-                try:
-                    today = date.today()
-                    days_left = (earnings_date - today).days
-                    c5.metric("📅 下次財報", f"{earnings_date}", f"{days_left} 天後" if days_left >= 0 else "剛結束", delta_color="off")
-                except:
-                    c5.metric("📅 下次財報", f"{earnings_date}")
-            else:
-                c5.metric("📅 下次財報", "N/A", "未公告/ETF")
-            
-            # --- 主圖表區 ---
+            # ---------------------------------------------------------
+            # 主圖表區塊
+            # ---------------------------------------------------------
             fig = make_subplots(
                 rows=2, cols=1, 
                 shared_xaxes=True, 
@@ -294,7 +296,6 @@ with tab1:
                 subplot_titles=(f"{selected_ticker} Price Action", "MACD Momentum")
             )
 
-            # Row 1: Price
             fig.add_trace(go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
             if cost_basis:
                 fig.add_hline(y=cost_basis, line_dash="dash", line_color="yellow", annotation_text="COST", row=1, col=1)
@@ -302,7 +303,6 @@ with tab1:
             fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_50'], name="EMA 50", line=dict(color='#FFA500', width=1.5)), row=1, col=1)
             fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_200'], name="EMA 200", line=dict(color='#FF0000', width=1.5)), row=1, col=1)
 
-            # Row 2: MACD
             colors = ['#00FF00' if v >= 0 else '#FF0000' for v in df['Hist']]
             fig.add_trace(go.Bar(x=df['Date'], y=df['Hist'], name="Histogram", marker_color=colors), row=2, col=1)
             fig.add_trace(go.Scatter(x=df['Date'], y=df['MACD'], name="MACD", line=dict(color='#00FFFF', width=1.5)), row=2, col=1)
@@ -319,21 +319,18 @@ with tab1:
             )
             st.plotly_chart(fig, use_container_width=True)
             
-            # --- 隱藏式：回購深入分析 (The Sniper View) ---
+            # --- 隱藏式：回購深入分析 ---
             if shares_df is not None:
                 with st.expander("🛡️ 護城河偵測：回購與股權分析 (Buyback Analysis)", expanded=False):
                     st.caption(f"數據來源：{selected_ticker} 季度/年度 財報 (Share Issued)")
                     
-                    # 建立雙軸圖表
                     fig_buyback = make_subplots(specs=[[{"secondary_y": True}]])
                     
-                    # 軸1：股價
                     fig_buyback.add_trace(
                         go.Scatter(x=df['Date'], y=df['Close'], name="股價 (Price)", line=dict(color='#00FFFF', width=2)),
                         secondary_y=False
                     )
                     
-                    # 軸2：流通股數
                     fig_buyback.add_trace(
                         go.Scatter(
                             x=shares_df.index, 
@@ -356,7 +353,6 @@ with tab1:
                     
                     fig_buyback.update_yaxes(title_text="股價 Price", secondary_y=False)
                     
-                    # 手動計算右軸的 Range
                     min_shares = shares_df['Shares'].min()
                     max_shares = shares_df['Shares'].max()
                     padding = (max_shares - min_shares) * 0.2 if max_shares != min_shares else max_shares * 0.01
