@@ -50,7 +50,7 @@ def save_portfolio(df):
         st.stop()
 
 # --- 2. 頁面設定 ---
-st.set_page_config(page_title="戰術狙擊鏡 v7.6 (Whale Tracker)", layout="wide")
+st.set_page_config(page_title="戰術狙擊鏡 v7.7 (Whale UI Optimized)", layout="wide")
 st.title("🦅 戰術狙擊鏡 (Pro Edition)")
 
 # --- 3. 數據核心 ---
@@ -159,7 +159,6 @@ def get_smart_money_data(ticker):
     except:
         return None, None
 
-# 🌟 NEW: 抓取前十大機構持倉明細
 @st.cache_data(ttl=86400)
 def get_institutional_holders(ticker):
     if "^" in ticker or "USD" in ticker: return None
@@ -394,23 +393,60 @@ with tab1:
 
                     st.plotly_chart(fig_buyback, use_container_width=True)
             
-            # --- 🌟 隱藏式：巨鯨籌碼明細 ---
+            # --- 🌟 隱藏式：巨鯨籌碼明細 (視覺優化版) ---
             inst_holders_df = get_institutional_holders(selected_ticker)
             if inst_holders_df is not None:
                 with st.expander("🐋 巨鯨籌碼：前十大機構持倉明細 (Top Institutional Holders)", expanded=False):
                     st.caption(f"數據來源：{selected_ticker} 最新 13F 申報")
                     
-                    # 重新命名欄位讓介面更友善
+                    display_df = inst_holders_df.copy()
+                    
+                    # 數值轉換：將小數點轉為百分比數字 (0.0082 -> 0.82)
+                    if 'pctHeld' in display_df.columns:
+                        display_df['pctHeld'] = display_df['pctHeld'] * 100
+                    if 'pctChange' in display_df.columns:
+                        display_df['pctChange'] = display_df['pctChange'] * 100
+                        
+                    # 處理日期格式 (拿掉 00:00:00)
+                    if 'Date Reported' in display_df.columns:
+                        display_df['Date Reported'] = pd.to_datetime(display_df['Date Reported']).dt.strftime('%Y-%m-%d')
+                        
+                    # 重新命名欄位
                     rename_map = {
                         "Date Reported": "申報日期",
                         "Holder": "機構名稱",
-                        "pctHeld": "持股比例",
+                        "pctHeld": "持股比例 (%)",
                         "Shares": "持有股數",
-                        "Value": "市值 (USD)"
+                        "Value": "市值 (USD)",
+                        "pctChange": "增減比例 (%)"
                     }
-                    display_df = inst_holders_df.rename(columns=rename_map)
+                    display_df = display_df.rename(columns=rename_map)
                     
-                    st.dataframe(display_df, use_container_width=True, hide_index=True)
+                    # 使用 Pandas Styler 加入條件格式化 (紅綠燈顏色)
+                    def highlight_change(val):
+                        if pd.isna(val): return ''
+                        if isinstance(val, (int, float)):
+                            if val > 0: return 'color: #00FF00;' # 綠色
+                            elif val < 0: return 'color: #FF4136;' # 紅色
+                        return ''
+
+                    # 設定顯示格式
+                    format_dict = {
+                        "持股比例 (%)": "{:.2f}%",
+                        "增減比例 (%)": "{:+.2f}%",
+                        "持有股數": "{:,.0f}",
+                        "市值 (USD)": "${:,.0f}"
+                    }
+                    
+                    # 過濾掉不存在的欄位以避免報錯
+                    format_dict = {k: v for k, v in format_dict.items() if k in display_df.columns}
+                    
+                    # 套用樣式
+                    styled_df = display_df.style.format(format_dict)
+                    if "增減比例 (%)" in display_df.columns:
+                        styled_df = styled_df.applymap(highlight_change, subset=["增減比例 (%)"])
+                    
+                    st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
         else:
             st.warning(f"⚠️ 找不到 **{selected_ticker}** 的數據。")
