@@ -50,7 +50,7 @@ def save_portfolio(df):
         st.stop()
 
 # --- 2. 頁面設定 ---
-st.set_page_config(page_title="戰術狙擊鏡 v7.4 (UI Optimized)", layout="wide")
+st.set_page_config(page_title="戰術狙擊鏡 v7.5 (Smart Money)", layout="wide")
 st.title("🦅 戰術狙擊鏡 (Pro Edition)")
 
 # --- 3. 數據核心 ---
@@ -70,12 +70,10 @@ def get_stock_data(ticker, period="2y"):
             df.columns = df.columns.get_level_values(0)
         df = df.reset_index()
         
-        # EMA
         df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
         df['EMA_200'] = df['Close'].ewm(span=200, adjust=False).mean()
         
-        # MACD
         exp1 = df['Close'].ewm(span=12, adjust=False).mean()
         exp2 = df['Close'].ewm(span=26, adjust=False).mean()
         df['MACD'] = exp1 - exp2
@@ -83,24 +81,21 @@ def get_stock_data(ticker, period="2y"):
         df['Hist'] = df['MACD'] - df['Signal']
         
         return df
-    except Exception as e:
+    except Exception:
         return None
 
 @st.cache_data(ttl=86400)
 def get_shares_data(ticker):
     if "^" in ticker or "USD" in ticker: return None, None
-
     try:
         tk = yf.Ticker(ticker)
-        
-        # 嘗試從季度資產負債表抓取
         try:
             bs = tk.quarterly_balance_sheet
             if bs.empty:
                 bs = tk.balance_sheet 
             
             share_row = None
-            # 🚨 修正：嚴格限制只能抓「真實股數」欄位，拿掉會抓到美元金額的 'Common Stock' 和 'Capital Stock'
+            # 🚨 已修正：嚴格限制只能抓「真實股數」欄位，避免抓到會計金額
             possible_names = ['Ordinary Shares Number', 'Share Issued']
             
             for name in possible_names:
@@ -125,14 +120,12 @@ def get_shares_data(ticker):
         except:
             pass 
 
-        # 如果財報沒抓到實體股數，回退使用 info 裡的最新股數（但不計算趨勢）
         info = tk.info
         latest_shares = info.get('sharesOutstanding')
         if latest_shares:
             return None, 0.0 
             
         return None, None
-
     except Exception:
         return None, None
 
@@ -142,7 +135,6 @@ def get_earnings_date(ticker):
     try:
         tk = yf.Ticker(ticker)
         cal = tk.calendar
-        
         if cal is not None and 'Earnings Date' in cal:
             dates = cal['Earnings Date']
             if isinstance(dates, list) and len(dates) > 0:
@@ -151,18 +143,33 @@ def get_earnings_date(ticker):
         pass
     return None
 
+# 🌟 NEW: 抓取聰明錢籌碼動向
+@st.cache_data(ttl=86400)
+def get_smart_money_data(ticker):
+    if "^" in ticker or "USD" in ticker: return None, None
+    try:
+        tk = yf.Ticker(ticker)
+        info = tk.info
+        
+        # 取得機構持股比例與空單比例
+        inst_own = info.get('heldPercentInstitutions')
+        short_pct = info.get('shortPercentOfFloat')
+        
+        # 轉換成百分比
+        inst_own = (inst_own * 100) if inst_own is not None else None
+        short_pct = (short_pct * 100) if short_pct is not None else None
+        
+        return inst_own, short_pct
+    except:
+        return None, None
+
 # --- 4. 主介面邏輯 ---
 tab1, tab2 = st.tabs(["📊 戰術看板", "📝 庫存管理"])
 
-# ==========================================
-# TAB 2: 庫存管理
-# ==========================================
 with tab2:
     st.markdown("### ☁️ 雲端庫存管理")
     st.caption("Backend: Google Sheets (via Apps Script)")
-    
     current_df = load_portfolio()
-    
     edited_df = st.data_editor(
         current_df,
         num_rows="dynamic",
@@ -182,18 +189,13 @@ with tab2:
         st.success("✅ 同步完成！")
         st.rerun()
 
-# ==========================================
-# TAB 1: 戰術看板
-# ==========================================
 with tab1:
     portfolio_df = load_portfolio()
-    
     selected_ticker = None
     time_range = "2y"
 
     with st.sidebar:
         st.header("🔭 戰術導航")
-        
         filter_type = st.radio("模式", ["全部", "💰 持倉", "👀 關注"])
         
         if filter_type == "💰 持倉":
@@ -220,7 +222,6 @@ with tab1:
                 st.caption(f"📝 筆記: {note}")
             
             time_range = st.select_slider("K線範圍", options=["6mo", "1y", "2y", "5y"], value="2y")
-            
             st.divider()
             st.markdown("### 🕵️‍♂️ 外部情報")
             st.link_button("📊 查看 DIX / GEX (暗池)", "https://squeezemetrics.com/monitor/dix", help="前往 SqueezeMetrics 查看暗池指標")
@@ -229,6 +230,7 @@ with tab1:
         df = get_stock_data(selected_ticker, time_range)
         shares_df, shares_yoy = get_shares_data(selected_ticker)
         earnings_date = get_earnings_date(selected_ticker)
+        inst_own, short_pct = get_smart_money_data(selected_ticker) # 抓取籌碼資料
         
         if df is not None and not df.empty:
             latest = df.iloc[-1]
@@ -238,9 +240,9 @@ with tab1:
             pct_change = (change / prev['Close']) * 100
             
             # ---------------------------------------------------------
-            # 🎯 UI 優化：模組化情報卡片 (Intelligence Cards)
+            # 🎯 UI 優化：4欄情報卡片 (Intelligence Cards)
             # ---------------------------------------------------------
-            col_market, col_portfolio, col_intel = st.columns(3)
+            col_market, col_portfolio, col_intel, col_smart = st.columns(4)
             
             # 卡片 1：行情數據
             with col_market:
@@ -267,7 +269,6 @@ with tab1:
                     st.markdown("🏢 **企業情報**")
                     i1, i2 = st.columns(2)
                     
-                    # 財報處理
                     if earnings_date:
                         try:
                             today = date.today()
@@ -278,7 +279,6 @@ with tab1:
                     else:
                         i1.metric("下次財報", "N/A")
 
-                    # 回購處理
                     if shares_yoy is not None and shares_yoy != 0:
                         delta_color = "normal" if shares_yoy < 0 else "inverse" 
                         trend_text = "縮減" if shares_yoy < 0 else "稀釋"
@@ -287,6 +287,26 @@ with tab1:
                         i2.metric("股本趨勢", "持平", "")
                     else:
                         i2.metric("股本趨勢", "N/A", "")
+
+            # 卡片 4：籌碼動向 (Smart Money)
+            with col_smart:
+                with st.container(border=True):
+                    st.markdown("🐋 **籌碼動向**")
+                    s1, s2 = st.columns(2)
+                    
+                    # 機構持股
+                    if inst_own is not None:
+                        s1.metric("機構持股", f"{inst_own:.1f}%")
+                    else:
+                        s1.metric("機構持股", "N/A")
+                        
+                    # 空單比例
+                    if short_pct is not None:
+                        # 幫空單比例加上一點視覺提示：大於 10% 屬於高空單，標記紅色提示軋空風險/機會
+                        delta_str = "🔥 高空單" if short_pct > 10 else ""
+                        s2.metric("空單比例", f"{short_pct:.2f}%", delta_str, delta_color="inverse" if short_pct > 10 else "off")
+                    else:
+                        s2.metric("空單比例", "N/A")
 
             # ---------------------------------------------------------
             # 主圖表區塊
@@ -326,7 +346,6 @@ with tab1:
             if shares_df is not None:
                 with st.expander("🛡️ 護城河偵測：回購與股權分析 (Buyback Analysis)", expanded=False):
                     st.caption(f"數據來源：{selected_ticker} 季度/年度 財報 (Share Issued)")
-                    
                     fig_buyback = make_subplots(specs=[[{"secondary_y": True}]])
                     
                     fig_buyback.add_trace(
