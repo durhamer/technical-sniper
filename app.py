@@ -240,12 +240,13 @@ with tab1:
             pct_change = (change / prev['Close']) * 100
             
             # ---------------------------------------------------------
-            # 🎯 UI 優化：4欄情報卡片 (Intelligence Cards)
+            # 🎯 UI 優化：2x2 網格情報卡片 (Intelligence Cards)
             # ---------------------------------------------------------
-            col_market, col_portfolio, col_intel, col_smart = st.columns(4)
+            # 第一排：即時行情 vs 部位狀態
+            row1_col1, row1_col2 = st.columns(2)
             
             # 卡片 1：行情數據
-            with col_market:
+            with row1_col1:
                 with st.container(border=True):
                     st.markdown("📉 **即時行情**")
                     m1, m2 = st.columns(2)
@@ -253,7 +254,7 @@ with tab1:
                     m2.metric("EMA 20", f"{latest['EMA_20']:.2f}")
             
             # 卡片 2：部位狀態
-            with col_portfolio:
+            with row1_col2:
                 with st.container(border=True):
                     st.markdown("💼 **部位狀態**")
                     if cost_basis:
@@ -262,9 +263,14 @@ with tab1:
                         st.metric("持倉損益", f"{pl_pct:+.2f}%", f"{pl:+.2f}", delta_color="normal" if pl > 0 else "inverse")
                     else:
                         st.metric("目前狀態", "👀 觀察清單", "")
-            
+
+            st.write("") # 稍微留白增加呼吸空間
+
+            # 第二排：企業情報 vs 籌碼動向
+            row2_col1, row2_col2 = st.columns(2)
+
             # 卡片 3：企業情報
-            with col_intel:
+            with row2_col1:
                 with st.container(border=True):
                     st.markdown("🏢 **企業情報**")
                     i1, i2 = st.columns(2)
@@ -289,21 +295,18 @@ with tab1:
                         i2.metric("股本趨勢", "N/A", "")
 
             # 卡片 4：籌碼動向 (Smart Money)
-            with col_smart:
+            with row2_col2:
                 with st.container(border=True):
                     st.markdown("🐋 **籌碼動向**")
                     s1, s2 = st.columns(2)
                     
-                    # 機構持股
                     if inst_own is not None:
                         s1.metric("機構持股", f"{inst_own:.1f}%")
                     else:
                         s1.metric("機構持股", "N/A")
                         
-                    # 空單比例
                     if short_pct is not None:
-                        # 幫空單比例加上一點視覺提示：大於 10% 屬於高空單，標記紅色提示軋空風險/機會
-                        delta_str = "🔥 高空單" if short_pct > 10 else ""
+                        delta_str = "🔥 高空單" if short_pct > 10 else "正常"
                         s2.metric("空單比例", f"{short_pct:.2f}%", delta_str, delta_color="inverse" if short_pct > 10 else "off")
                     else:
                         s2.metric("空單比例", "N/A")
