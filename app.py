@@ -223,57 +223,58 @@ with tab1:
         # 2. 取得回購數據
         shares_df, shares_yoy = get_shares_data(selected_ticker)
         
-        # --- 隱藏式：回購深入分析 (The Sniper View) ---
-            if shares_df is not None:
-                with st.expander("🛡️ 護城河偵測：回購與股權分析 (Buyback Analysis)", expanded=False):
-                    st.caption(f"數據來源：{selected_ticker} 季度/年度 財報 (Share Issued)")
-                    
-                    # 建立雙軸圖表
-                    fig_buyback = make_subplots(specs=[[{"secondary_y": True}]])
-                    
-                    # 軸1：股價
-                    fig_buyback.add_trace(
-                        go.Scatter(x=df['Date'], y=df['Close'], name="股價 (Price)", line=dict(color='#00FFFF', width=2)),
-                        secondary_y=False
-                    )
-                    
-                    # 軸2：流通股數 
-                    # 🔴 修正 1：拿掉 fill='tozeroy'，並加上 shape='hv' 變成階梯圖 (更符合季報發布的真實狀況)
-                    fig_buyback.add_trace(
-                        go.Scatter(
-                            x=shares_df.index, 
-                            y=shares_df['Shares'], 
-                            name="流通股數 (Shares)", 
-                            line=dict(color='#FFA500', width=3, shape='hv'), 
-                            mode='lines+markers',
-                            marker=dict(size=6)
-                        ),
-                        secondary_y=True
-                    )
-                    
-                    fig_buyback.update_layout(
-                        title=f"{selected_ticker} - 股價 vs 股本趨勢",
-                        template="plotly_dark",
-                        height=450,
-                        hovermode="x unified",
-                        legend=dict(orientation="h", y=1.1, x=0)
-                    )
-                    
-                    fig_buyback.update_yaxes(title_text="股價 Price", secondary_y=False)
-                    
-                    # 🔴 修正 2：手動計算右軸的 Range，留出一點點 Padding，徹底斷絕 Plotly 從 0 開始的念頭
-                    min_shares = shares_df['Shares'].min()
-                    max_shares = shares_df['Shares'].max()
-                    padding = (max_shares - min_shares) * 0.2 if max_shares != min_shares else max_shares * 0.01
-                    
-                    fig_buyback.update_yaxes(
-                        title_text="流通股數 Shares", 
-                        secondary_y=True, 
-                        showgrid=False, 
-                        range=[min_shares - padding, max_shares + padding]
-                    )
+        # ... (上面是 get_shares_data 的部分)
 
-                    st.plotly_chart(fig_buyback, use_container_width=True)
+        # --- 隱藏式：回購深入分析 (The Sniper View) ---
+        if shares_df is not None:  # <--- 注意這裡，要跟上一行對齊，不要多縮進
+            with st.expander("🛡️ 護城河偵測：回購與股權分析 (Buyback Analysis)", expanded=False):
+                st.caption(f"數據來源：{selected_ticker} 季度/年度 財報 (Share Issued)")
+                
+                # 建立雙軸圖表
+                fig_buyback = make_subplots(specs=[[{"secondary_y": True}]])
+                
+                # 軸1：股價
+                fig_buyback.add_trace(
+                    go.Scatter(x=df['Date'], y=df['Close'], name="股價 (Price)", line=dict(color='#00FFFF', width=2)),
+                    secondary_y=False
+                )
+                
+                # 軸2：流通股數 
+                fig_buyback.add_trace(
+                    go.Scatter(
+                        x=shares_df.index, 
+                        y=shares_df['Shares'], 
+                        name="流通股數 (Shares)", 
+                        line=dict(color='#FFA500', width=3, shape='hv'), 
+                        mode='lines+markers',
+                        marker=dict(size=6)
+                    ),
+                    secondary_y=True
+                )
+                
+                fig_buyback.update_layout(
+                    title=f"{selected_ticker} - 股價 vs 股本趨勢",
+                    template="plotly_dark",
+                    height=450,
+                    hovermode="x unified",
+                    legend=dict(orientation="h", y=1.1, x=0)
+                )
+                
+                fig_buyback.update_yaxes(title_text="股價 Price", secondary_y=False)
+                
+                # 手動計算右軸的 Range
+                min_shares = shares_df['Shares'].min()
+                max_shares = shares_df['Shares'].max()
+                padding = (max_shares - min_shares) * 0.2 if max_shares != min_shares else max_shares * 0.01
+                
+                fig_buyback.update_yaxes(
+                    title_text="流通股數 Shares", 
+                    secondary_y=True, 
+                    showgrid=False, 
+                    range=[min_shares - padding, max_shares + padding]
+                )
+
+                st.plotly_chart(fig_buyback, use_container_width=True)
             
         else:
             st.warning(f"⚠️ 找不到 **{selected_ticker}** 的數據。")
