@@ -86,19 +86,25 @@ def get_stock_data(ticker, period="1y"):
     except Exception as e:
         return None
 
-@st.cache_data(ttl=86400) # 這些數據更新頻率低，cache 久一點
+@st.cache_data(ttl=86400)
 def get_shares_data(ticker):
     """
-    獲取流通股數歷史數據，用於判斷回購力道
+    獲取流通股數歷史數據 (增強除錯版)
     """
-    if "^" in ticker or "USD" in ticker: return None, None # 排除指數和加密貨幣
+    if "^" in ticker or "USD" in ticker: return None, None
 
     try:
         tk = yf.Ticker(ticker)
-        # 獲取股數歷史 (yf 現在有 get_shares_full)
-        shares = tk.get_shares_full(start="2020-01-01")
+        
+        # 嘗試獲取股數歷史
+        try:
+            shares = tk.get_shares_full(start="2020-01-01")
+        except Exception as e:
+            # 如果失敗，嘗試不帶參數（預設抓所有歷史）
+            shares = tk.get_shares_full()
         
         if shares is None or shares.empty:
+            st.toast(f"⚠️ {ticker}: 找不到股數歷史資料", icon="info")
             return None, None
 
         # 整理數據
@@ -106,18 +112,32 @@ def get_shares_data(ticker):
         shares_df.index = pd.to_datetime(shares_df.index)
         shares_df = shares_df.sort_index()
         
+        # 確保數據是最新的
+        if shares_df.empty: return None, None
+
         # 計算 YoY 變化
         latest_shares = shares_df['Shares'].iloc[-1]
         
-        # 找一年前的股數
+        # 找一年前的股數 (如果資料不足一年，就用最早的數據當基準)
         one_year_ago = datetime.now() - timedelta(days=365)
-        idx = shares_df.index.get_indexer([one_year_ago], method='nearest')[0]
+        
+        # 使用 searchsorted 找最近的索引，避免 get_indexer 報錯
+        idx = shares_df.index.searchsorted(one_year_ago)
+        # 如果 index 超出範圍，修正回來
+        if idx >= len(shares_df): idx = len(shares_df) - 1
+        
         prev_shares = shares_df['Shares'].iloc[idx]
         
+        # 避免分母為 0
+        if prev_shares == 0: return shares_df, 0.0
+            
         yoy_change = ((latest_shares - prev_shares) / prev_shares) * 100
         
         return shares_df, yoy_change
+
     except Exception as e:
+        # 在網頁側邊欄印出錯誤，方便除錯 (只有你看得到)
+        print(f"❌ Error getting shares for {ticker}: {e}")
         return None, None
 
 # --- 4. 主介面邏輯 ---
