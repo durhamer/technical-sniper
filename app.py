@@ -50,7 +50,7 @@ def save_portfolio(df):
         st.stop()
 
 # --- 2. 頁面設定 ---
-st.set_page_config(page_title="戰術狙擊鏡 v7.5 (Smart Money)", layout="wide")
+st.set_page_config(page_title="戰術狙擊鏡 v7.6 (Whale Tracker)", layout="wide")
 st.title("🦅 戰術狙擊鏡 (Pro Edition)")
 
 # --- 3. 數據核心 ---
@@ -95,7 +95,6 @@ def get_shares_data(ticker):
                 bs = tk.balance_sheet 
             
             share_row = None
-            # 🚨 已修正：嚴格限制只能抓「真實股數」欄位，避免抓到會計金額
             possible_names = ['Ordinary Shares Number', 'Share Issued']
             
             for name in possible_names:
@@ -143,7 +142,6 @@ def get_earnings_date(ticker):
         pass
     return None
 
-# 🌟 NEW: 抓取聰明錢籌碼動向
 @st.cache_data(ttl=86400)
 def get_smart_money_data(ticker):
     if "^" in ticker or "USD" in ticker: return None, None
@@ -151,17 +149,28 @@ def get_smart_money_data(ticker):
         tk = yf.Ticker(ticker)
         info = tk.info
         
-        # 取得機構持股比例與空單比例
         inst_own = info.get('heldPercentInstitutions')
         short_pct = info.get('shortPercentOfFloat')
         
-        # 轉換成百分比
         inst_own = (inst_own * 100) if inst_own is not None else None
         short_pct = (short_pct * 100) if short_pct is not None else None
         
         return inst_own, short_pct
     except:
         return None, None
+
+# 🌟 NEW: 抓取前十大機構持倉明細
+@st.cache_data(ttl=86400)
+def get_institutional_holders(ticker):
+    if "^" in ticker or "USD" in ticker: return None
+    try:
+        tk = yf.Ticker(ticker)
+        df = tk.institutional_holders
+        if df is not None and not df.empty:
+            return df
+    except:
+        pass
+    return None
 
 # --- 4. 主介面邏輯 ---
 tab1, tab2 = st.tabs(["📊 戰術看板", "📝 庫存管理"])
@@ -230,7 +239,7 @@ with tab1:
         df = get_stock_data(selected_ticker, time_range)
         shares_df, shares_yoy = get_shares_data(selected_ticker)
         earnings_date = get_earnings_date(selected_ticker)
-        inst_own, short_pct = get_smart_money_data(selected_ticker) # 抓取籌碼資料
+        inst_own, short_pct = get_smart_money_data(selected_ticker) 
         
         if df is not None and not df.empty:
             latest = df.iloc[-1]
@@ -240,12 +249,10 @@ with tab1:
             pct_change = (change / prev['Close']) * 100
             
             # ---------------------------------------------------------
-            # 🎯 UI 優化：2x2 網格情報卡片 (Intelligence Cards)
+            # 🎯 UI 2x2 網格情報卡片
             # ---------------------------------------------------------
-            # 第一排：即時行情 vs 部位狀態
             row1_col1, row1_col2 = st.columns(2)
             
-            # 卡片 1：行情數據
             with row1_col1:
                 with st.container(border=True):
                     st.markdown("📉 **即時行情**")
@@ -253,7 +260,6 @@ with tab1:
                     m1.metric("現價", f"{price:.2f}", f"{change:.2f} ({pct_change:.2f}%)")
                     m2.metric("EMA 20", f"{latest['EMA_20']:.2f}")
             
-            # 卡片 2：部位狀態
             with row1_col2:
                 with st.container(border=True):
                     st.markdown("💼 **部位狀態**")
@@ -264,12 +270,10 @@ with tab1:
                     else:
                         st.metric("目前狀態", "👀 觀察清單", "")
 
-            st.write("") # 稍微留白增加呼吸空間
+            st.write("") 
 
-            # 第二排：企業情報 vs 籌碼動向
             row2_col1, row2_col2 = st.columns(2)
 
-            # 卡片 3：企業情報
             with row2_col1:
                 with st.container(border=True):
                     st.markdown("🏢 **企業情報**")
@@ -294,7 +298,6 @@ with tab1:
                     else:
                         i2.metric("股本趨勢", "N/A", "")
 
-            # 卡片 4：籌碼動向 (Smart Money)
             with row2_col2:
                 with st.container(border=True):
                     st.markdown("🐋 **籌碼動向**")
@@ -391,6 +394,24 @@ with tab1:
 
                     st.plotly_chart(fig_buyback, use_container_width=True)
             
+            # --- 🌟 隱藏式：巨鯨籌碼明細 ---
+            inst_holders_df = get_institutional_holders(selected_ticker)
+            if inst_holders_df is not None:
+                with st.expander("🐋 巨鯨籌碼：前十大機構持倉明細 (Top Institutional Holders)", expanded=False):
+                    st.caption(f"數據來源：{selected_ticker} 最新 13F 申報")
+                    
+                    # 重新命名欄位讓介面更友善
+                    rename_map = {
+                        "Date Reported": "申報日期",
+                        "Holder": "機構名稱",
+                        "pctHeld": "持股比例",
+                        "Shares": "持有股數",
+                        "Value": "市值 (USD)"
+                    }
+                    display_df = inst_holders_df.rename(columns=rename_map)
+                    
+                    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
         else:
             st.warning(f"⚠️ 找不到 **{selected_ticker}** 的數據。")
     else:
