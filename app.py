@@ -93,13 +93,15 @@ def get_shares_data(ticker):
     try:
         tk = yf.Ticker(ticker)
         
+        # 嘗試從季度資產負債表抓取
         try:
             bs = tk.quarterly_balance_sheet
             if bs.empty:
                 bs = tk.balance_sheet 
             
             share_row = None
-            possible_names = ['Share Issued', 'Ordinary Shares Number', 'Common Stock', 'Capital Stock']
+            # 🚨 修正：嚴格限制只能抓「真實股數」欄位，拿掉會抓到美元金額的 'Common Stock' 和 'Capital Stock'
+            possible_names = ['Ordinary Shares Number', 'Share Issued']
             
             for name in possible_names:
                 if name in bs.index:
@@ -123,6 +125,7 @@ def get_shares_data(ticker):
         except:
             pass 
 
+        # 如果財報沒抓到實體股數，回退使用 info 裡的最新股數（但不計算趨勢）
         info = tk.info
         latest_shares = info.get('sharesOutstanding')
         if latest_shares:
