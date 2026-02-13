@@ -50,12 +50,12 @@ def save_portfolio(df):
         st.stop()
 
 # --- 2. 頁面設定 ---
-st.set_page_config(page_title="戰術狙擊鏡 v7.1 (Stable)", layout="wide")
+st.set_page_config(page_title="戰術狙擊鏡 v7.2 (Quarterly)", layout="wide")
 st.title("🦅 戰術狙擊鏡 (Pro Edition)")
 
 # --- 3. 數據核心 ---
 @st.cache_data(ttl=300)
-def get_stock_data(ticker, period="1y"):
+def get_stock_data(ticker, period="2y"): # 預設改為 2y 以配合財報顯示
     mapping = {
         "SOX": "^SOX", "NDX": "^NDX", "DJI": "^DJI", "GSPC": "^GSPC", 
         "VIX": "^VIX", "BTC": "BTC-USD", "ETH": "ETH-USD"
@@ -89,18 +89,20 @@ def get_stock_data(ticker, period="1y"):
 @st.cache_data(ttl=86400)
 def get_shares_data(ticker):
     """
-    獲取流通股數歷史數據 (v7.1 Stable: 改抓資產負債表)
+    獲取流通股數歷史數據 (v7.2: 改抓季度 Quarterly)
     """
     if "^" in ticker or "USD" in ticker: return None, None
 
     try:
         tk = yf.Ticker(ticker)
         
-        # 嘗試方法 1: 從資產負債表抓 (Balance Sheet) - 這是最標準的季報數據
+        # 嘗試從 季度資產負債表 抓 (Quarterly Balance Sheet)
         try:
-            bs = tk.balance_sheet
-            # 尋找類似 'Share Issued' 或 'Common Stock' 的欄位
-            # yfinance 的欄位名稱有時候會變，這裡做個模糊搜尋
+            # 優先抓 Quarterly (解析度較高)
+            bs = tk.quarterly_balance_sheet
+            if bs.empty:
+                bs = tk.balance_sheet # 如果沒有季度，降級抓年度
+            
             share_row = None
             possible_names = ['Share Issued', 'Ordinary Shares Number', 'Common Stock', 'Capital Stock']
             
@@ -114,22 +116,25 @@ def get_shares_data(ticker):
                 shares_df.columns = ['Shares']
                 shares_df.index = pd.to_datetime(shares_df.index)
                 
-                # 計算 YoY (拿最近一期跟四期前比)
+                # 計算 YoY (拿最近一期跟四期前比，如果是年度就跟一期前比)
                 if len(shares_df) >= 2:
                     latest = shares_df['Shares'].iloc[-1]
-                    prev = shares_df['Shares'].iloc[0] # 最舊的數據
+                    # 簡單邏輯：如果有足夠數據，跟一年前(大約4季前)比，否則跟上一筆比
+                    if len(shares_df) >= 5:
+                        prev = shares_df['Shares'].iloc[-5] 
+                    else:
+                        prev = shares_df['Shares'].iloc[0]
+                        
                     yoy_change = ((latest - prev) / prev) * 100
                     return shares_df, yoy_change
         except:
-            pass # 如果資產負債表失敗，就往下走
+            pass 
 
-        # 嘗試方法 2: 只抓最新數據 (Info)
+        # 備案: Info
         info = tk.info
         latest_shares = info.get('sharesOutstanding')
-        
         if latest_shares:
-            # 造一個假的 DataFrame 只有一點，為了顯示 Current 數值
-            return None, 0.0 # 沒有歷史數據，回傳 0.0 表示無法計算趨勢
+            return None, 0.0 
             
         return None, None
 
@@ -175,7 +180,7 @@ with tab1:
     portfolio_df = load_portfolio()
     
     selected_ticker = None
-    time_range = "1y" 
+    time_range = "2y" # 預設改長一點，方便看財報趨勢
 
     with st.sidebar:
         st.header("🔭 戰術導航")
@@ -205,7 +210,7 @@ with tab1:
             if note:
                 st.caption(f"📝 筆記: {note}")
             
-            time_range = st.select_slider("K線範圍", options=["3mo", "6mo", "1y", "3y", "5y"], value="1y")
+            time_range = st.select_slider("K線範圍", options=["6mo", "1y", "2y", "5y"], value="2y")
             
             st.divider()
             st.markdown("### 🕵️‍♂️ 外部情報")
@@ -285,7 +290,7 @@ with tab1:
             # --- 隱藏式：回購深入分析 (The Sniper View) ---
             if shares_df is not None:
                 with st.expander("🛡️ 護城河偵測：回購與股權分析 (Buyback Analysis)", expanded=False):
-                    st.caption("數據來源：年度/季度 資產負債表 (Share Issued)")
+                    st.caption(f"數據來源：{selected_ticker} 季度/年度 財報 (Share Issued)")
                     
                     # 建立雙軸圖表
                     fig_buyback = make_subplots(specs=[[{"secondary_y": True}]])
@@ -296,28 +301,30 @@ with tab1:
                         secondary_y=False
                     )
                     
-                    # 軸2：流通股數 (使用 Bar chart 因為財報數據是離散的)
+                    # 軸2：流通股數 (改用 Area Chart，看起來更連續)
                     fig_buyback.add_trace(
-                        go.Bar(
+                        go.Scatter(
                             x=shares_df.index, 
                             y=shares_df['Shares'], 
-                            name="流通股數 (Shares Issued)", 
-                            marker_color='#FFA500',
-                            opacity=0.6
+                            name="流通股數 (Shares)", 
+                            fill='tozeroy', # 填滿下方顏色
+                            line=dict(color='#FFA500', width=2),
+                            mode='lines+markers' # 顯示點和線
                         ),
                         secondary_y=True
                     )
                     
                     fig_buyback.update_layout(
-                        title=f"{selected_ticker} - 股價 vs 股本變化",
+                        title=f"{selected_ticker} - 股價 vs 股本趨勢",
                         template="plotly_dark",
-                        height=400,
+                        height=450,
                         hovermode="x unified",
                         legend=dict(orientation="h", y=1.1)
                     )
                     
                     fig_buyback.update_yaxes(title_text="股價 Price", secondary_y=False)
-                    fig_buyback.update_yaxes(title_text="流通股數 Shares", secondary_y=True, showgrid=False)
+                    # 自動縮放右軸，不從 0 開始，這樣微小的變化才看得出來
+                    fig_buyback.update_yaxes(title_text="流通股數 Shares", secondary_y=True, showgrid=False, autorange=True)
 
                     st.plotly_chart(fig_buyback, use_container_width=True)
             
