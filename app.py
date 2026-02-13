@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, date
 
 # --- 1. Google Apps Script 設定 ---
 GAS_URL = "https://script.google.com/macros/s/AKfycbxbRhj557u8nwTMR6uyYQsUAaAVldnlOHHrBJHKMrai9zuVURxqw7GcoFJY-S1Ct3Tsxw/exec"
@@ -50,7 +50,7 @@ def save_portfolio(df):
         st.stop()
 
 # --- 2. 頁面設定 ---
-st.set_page_config(page_title="戰術狙擊鏡 v7.2 (Quarterly)", layout="wide")
+st.set_page_config(page_title="戰術狙擊鏡 v7.3 (Earnings)", layout="wide")
 st.title("🦅 戰術狙擊鏡 (Pro Edition)")
 
 # --- 3. 數據核心 ---
@@ -134,8 +134,30 @@ def get_shares_data(ticker):
         return None, None
 
     except Exception as e:
-        print(f"❌ Error getting shares for {ticker}: {e}")
+        # print(f"❌ Error getting shares for {ticker}: {e}")
         return None, None
+
+@st.cache_data(ttl=86400)
+def get_earnings_date(ticker):
+    """
+    抓取下一次財報日期
+    """
+    if "^" in ticker or "USD" in ticker: return None
+    try:
+        tk = yf.Ticker(ticker)
+        cal = tk.calendar
+        
+        # yfinance 的 calendar 有時回傳 dict，有時回傳 dataframe
+        # 通常 key 是 'Earnings Date'，value 是一個 list (可能是預測區間)
+        if cal is not None and 'Earnings Date' in cal:
+            dates = cal['Earnings Date']
+            if isinstance(dates, list) and len(dates) > 0:
+                # 取第一個日期 (通常是區間開始日或確定日)
+                earnings_date = dates[0]
+                return earnings_date
+    except:
+        pass
+    return None
 
 # --- 4. 主介面邏輯 ---
 tab1, tab2 = st.tabs(["📊 戰術看板", "📝 庫存管理"])
@@ -217,6 +239,9 @@ with tab1:
         
         # 2. 取得回購數據
         shares_df, shares_yoy = get_shares_data(selected_ticker)
+
+        # 3. 取得財報日期 (New Feature)
+        earnings_date = get_earnings_date(selected_ticker)
         
         if df is not None and not df.empty:
             latest = df.iloc[-1]
@@ -225,8 +250,8 @@ with tab1:
             change = price - prev['Close']
             pct_change = (change / prev['Close']) * 100
             
-            # --- 頂部指標區 ---
-            c1, c2, c3, c4 = st.columns(4)
+            # --- 頂部指標區 (改為 5 欄) ---
+            c1, c2, c3, c4, c5 = st.columns(5)
             c1.metric(selected_ticker, f"{price:.2f}", f"{change:.2f} ({pct_change:.2f}%)")
             
             if cost_basis:
@@ -242,11 +267,23 @@ with tab1:
                 trend_text = "縮減 (回購)" if shares_yoy < 0 else "增加 (稀釋)"
                 c3.metric("流通股數 Trend", f"{shares_yoy:.2f}%", trend_text, delta_color=delta_color)
             elif shares_yoy == 0:
-                 c3.metric("流通股數", "Data OK", "趨勢持平/無歷史")
+                 c3.metric("流通股數", "Data OK", "趨勢持平")
             else:
                 c3.metric("流通股數", "N/A", "無法取得")
 
             c4.metric("EMA 20", f"{latest['EMA_20']:.2f}")
+
+            # 財報日期顯示
+            if earnings_date:
+                # 簡單計算還有幾天
+                try:
+                    today = date.today()
+                    days_left = (earnings_date - today).days
+                    c5.metric("📅 下次財報", f"{earnings_date}", f"{days_left} 天後" if days_left >= 0 else "剛結束", delta_color="off")
+                except:
+                    c5.metric("📅 下次財報", f"{earnings_date}")
+            else:
+                c5.metric("📅 下次財報", "N/A", "未公告/ETF")
             
             # --- 主圖表區 ---
             fig = make_subplots(
@@ -296,7 +333,7 @@ with tab1:
                         secondary_y=False
                     )
                     
-                    # 軸2：流通股數 (拿掉 fill，改用 hv 階梯圖)
+                    # 軸2：流通股數
                     fig_buyback.add_trace(
                         go.Scatter(
                             x=shares_df.index, 
@@ -319,7 +356,7 @@ with tab1:
                     
                     fig_buyback.update_yaxes(title_text="股價 Price", secondary_y=False)
                     
-                    # 手動計算右軸的 Range 並加入 Padding，強制圖表縮放
+                    # 手動計算右軸的 Range
                     min_shares = shares_df['Shares'].min()
                     max_shares = shares_df['Shares'].max()
                     padding = (max_shares - min_shares) * 0.2 if max_shares != min_shares else max_shares * 0.01
