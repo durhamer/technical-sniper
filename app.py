@@ -180,61 +180,101 @@ with tab1:
             st.link_button("📊 查看 DIX / GEX (暗池)", "https://squeezemetrics.com/monitor/dix")
 
     # ==========================================
-    # 模式 A: 總覽雷達 (Macro Radar)
+    # 模式 A: 總覽雷達 (Macro Radar) - 狙擊增強版
     # ==========================================
     if not selected_ticker:
-        st.markdown("### 📡 持倉總覽雷達 (Macro Radar)")
-        st.caption("自動掃描所有「持倉 (Holding)」標的，並依財報日期排序，掌握前線戰況。")
+        st.markdown("### 📡 全球戰術雷達 (Global Tactical Radar)")
+        st.caption("同步掃描「持倉」與「關注」標的，監控 EMA 200 位階與財報倒數。")
         
-        holdings = portfolio_df[portfolio_df['Type'] == 'Holding']
-        if holdings.empty:
-            st.info("尚無持倉紀錄，請至「庫存管理」新增！")
+        # 掃描對象擴大到全部
+        all_targets = portfolio_df
+        if all_targets.empty:
+            st.info("尚無紀錄，請至「庫存管理」新增！")
         else:
-            with st.spinner("📡 啟動雷達掃描中，擷取最新戰況..."):
+            with st.spinner("📡 正在計算 EMA 200 乖離度與財報時程..."):
                 radar_data = []
-                for _, row in holdings.iterrows():
+                for _, row in all_targets.iterrows():
                     t = row['Ticker']
                     c = row['Cost']
-                    df_t = get_stock_data(t, period="1mo")
+                    stock_type = "💰" if row['Type'] == 'Holding' else "👀"
+                    
+                    # 抓取較長數據以計算 EMA 200
+                    df_t = get_stock_data(t, period="2y") 
                     e_date = get_earnings_date(t)
                     
-                    p = df_t['Close'].iloc[-1] if df_t is not None else 0
+                    if df_t is not None and len(df_t) > 200:
+                        p = df_t['Close'].iloc[-1]
+                        ema200 = df_t['EMA_200'].iloc[-1]
+                        prev_ema200 = df_t['EMA_200'].iloc[-2]
+                        prev_p = df_t['Close'].iloc[-2]
+                        
+                        # 1. 計算 EMA 200 乖離與趨勢
+                        dist_pct = ((p - ema200) / ema200) * 100
+                        prev_dist_pct = ((prev_p - prev_ema200) / prev_ema200) * 100
+                        
+                        # 判斷趨勢：是正在拉開距離還是縮小？
+                        if abs(dist_pct) > abs(prev_dist_pct):
+                            trend = "↗️ 擴張" if dist_pct > 0 else "↘️ 遠離"
+                        else:
+                            trend = "➡️ 修正" if dist_pct > 0 else "⤴️ 回歸"
+                        
+                        ema_info = f"{dist_pct:+.1f}% ({trend})"
+                    else:
+                        p = 0
+                        ema_info = "計算中..."
+
+                    # 2. 損益計算
                     pl_pct = ((p - c) / c * 100) if c > 0 else 0
-                    pl_val = p - c if c > 0 else 0
                     
+                    # 3. 財報倒數
                     days_left = 999
                     e_str = "N/A"
                     if e_date:
                         try:
                             days_left = (e_date - date.today()).days
-                            e_str = f"{e_date.strftime('%Y-%m-%d')} ({days_left}天)"
+                            e_str = f"{e_date.strftime('%m/%d')} ({days_left}d)"
                         except: pass
                         
                     radar_data.append({
+                        "狀態": stock_type,
                         "代碼": t,
-                        "成本價": c,
                         "最新價": p,
-                        "損益金額": pl_val,
-                        "報酬率 (%)": pl_pct,
-                        "下次財報": e_str,
-                        "_days": days_left # 隱藏排序用
+                        "報酬率 (%)": pl_pct if row['Type'] == 'Holding' else None,
+                        "EMA 200 乖離 (趨勢)": ema_info,
+                        "下次財報 (倒數)": e_str,
+                        "_days": days_left,
+                        "_dist": dist_pct if 'dist_pct' in locals() else 0
                     })
                 
                 if radar_data:
-                    radar_df = pd.DataFrame(radar_data).sort_values("_days").drop(columns=["_days"])
+                    radar_df = pd.DataFrame(radar_data).sort_values("_days")
                     
-                    def color_pl(val):
-                        if isinstance(val, str): return ''
-                        if val > 0: return 'color: #00FF00;'
-                        elif val < 0: return 'color: #FF4136;'
-                        return ''
+                    # 視覺化格式設定
+                    def style_radar(styler):
+                        # 財報警告：14天內變橘色，7天內變紅色
+                        def color_earnings(val):
+                            if '(' in str(val):
+                                days = int(str(val).split('(')[1].split('d')[0])
+                                if days <= 7: return 'background-color: #8B0000; color: white'
+                                if days <= 14: return 'background-color: #B8860B; color: white'
+                            return ''
+                        
+                        # EMA 200 顏色：高於綠色，低於紅色
+                        def color_ema(val):
+                            if '+' in str(val): return 'color: #00FF00;'
+                            if '-' in str(val): return 'color: #FF4136;'
+                            return ''
 
-                    styled_radar = radar_df.style.format({
-                        "成本價": "${:.2f}", "最新價": "${:.2f}", 
-                        "損益金額": "${:+.2f}", "報酬率 (%)": "{:+.2f}%"
-                    }).applymap(color_pl, subset=["損益金額", "報酬率 (%)"])
-                    
-                    st.dataframe(styled_radar, use_container_width=True, hide_index=True)
+                        styler.applymap(color_earnings, subset=["下次財報 (倒數)"])
+                        styler.applymap(color_ema, subset=["EMA 200 乖離 (趨勢)"])
+                        styler.format({
+                            "最新價": "${:.2f}",
+                            "報酬率 (%)": lambda x: f"{x:+.2f}%" if pd.notnull(x) else "---"
+                        })
+                        return styler
+
+                    styled_df = radar_df.drop(columns=["_days", "_dist"]).style.pipe(style_radar)
+                    st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
     # ==========================================
     # 模式 B: 單一股票戰術分析
