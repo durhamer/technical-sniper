@@ -163,5 +163,5 @@ def _render_whale_tab(ticker):
     }
     styled_df = display_df.style.format(format_dict)
     if "增減比例 (%)" in display_df.columns:
-        styled_df = styled_df.applymap(highlight_change, subset=["增減比例 (%)"])
+        styled_df = styled_df.map(highlight_change, subset=["增減比例 (%)"])
     st.dataframe(styled_df, use_container_width=True, hide_index=True)

@@ -9,6 +9,10 @@ TICKER_MAPPING = {
 }
 
 
+def _is_index_or_crypto(ticker):
+    return "^" in ticker or "USD" in ticker
+
+
 @st.cache_data(ttl=300)
 def get_stock_data(ticker, period="2y"):
     target_ticker = TICKER_MAPPING.get(ticker.upper(), ticker)
@@ -34,7 +38,7 @@ def get_stock_data(ticker, period="2y"):
 
 @st.cache_data(ttl=86400)
 def get_shares_data(ticker):
-    if "^" in ticker or "USD" in ticker:
+    if _is_index_or_crypto(ticker):
         return None, None
     try:
         tk = yf.Ticker(ticker)
@@ -69,7 +73,7 @@ def get_shares_data(ticker):
 
 @st.cache_data(ttl=86400)
 def get_earnings_date(ticker):
-    if "^" in ticker or "USD" in ticker:
+    if _is_index_or_crypto(ticker):
         return None
     try:
         tk = yf.Ticker(ticker)
@@ -85,7 +89,7 @@ def get_earnings_date(ticker):
 
 @st.cache_data(ttl=86400)
 def get_smart_money_data(ticker):
-    if "^" in ticker or "USD" in ticker:
+    if _is_index_or_crypto(ticker):
         return None, None
     try:
         info = yf.Ticker(ticker).info
@@ -98,7 +102,7 @@ def get_smart_money_data(ticker):
 
 @st.cache_data(ttl=86400)
 def get_institutional_holders(ticker):
-    if "^" in ticker or "USD" in ticker:
+    if _is_index_or_crypto(ticker):
         return None
     try:
         df = yf.Ticker(ticker).institutional_holders
