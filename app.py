@@ -48,7 +48,7 @@ with tab1:
         if not filtered_df.empty:
             select_options += filtered_df.apply(lambda x: f"{x['Ticker']} {'($' + str(x['Cost']) + ')' if x['Cost'] > 0 else ''}", axis=1).tolist()
 
-        selected_label = st.selectbox("選擇標的", select_options)
+        selected_label = st.selectbox("選擇標的", select_options, key=f"ticker_select_{filter_type}")
 
         if selected_label == "📡 總覽雷達 (Macro Radar)":
             selected_ticker = None
@@ -58,7 +58,8 @@ with tab1:
             cost_basis = row['Cost'] if row['Cost'] > 0 else None
             note = row.get('Note', '')
             st.divider()
-            if note: st.caption(f"📝 筆記: {note}")
+            if note and str(note).strip() not in ('None', 'nan', ''):
+                st.caption(f"📝 筆記: {note}")
             time_range = st.select_slider("K線範圍", options=["6mo", "1y", "2y", "5y"], value="2y")
             st.divider()
             st.link_button("📊 查看 DIX / GEX (暗池)", "https://squeezemetrics.com/monitor/dix")
