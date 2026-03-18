@@ -1,0 +1,21 @@
+# Indicator parameters
+EMA_FAST = 20
+EMA_MID = 50
+EMA_SLOW = 200
+MACD_FAST = 12
+MACD_SLOW = 26
+MACD_SIGNAL = 9
+
+# Judgment thresholds
+EARNINGS_CRITICAL_DAYS = 7
+EARNINGS_WARNING_DAYS = 14
+INST_OWN_THRESHOLD = 50       # %
+SHORT_SQUEEZE_THRESHOLD = 10  # %
+
+# Radar defaults
+MIN_EMA200_DATAPOINTS = 200
+DEFAULT_DAYS_TO_EARNINGS = 999
+
+# S/R detection
+SR_ROLLING_WINDOW = 20
+SR_PROXIMITY_PCT = 2.0  # within 2% of level = "near S/R"

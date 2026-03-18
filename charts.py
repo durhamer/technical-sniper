@@ -1,6 +1,8 @@
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from data import find_support_resistance
+
 
 def build_candlestick_chart(df, cost_basis=None):
     """Build the main candlestick + MACD chart."""
@@ -23,6 +25,23 @@ def build_candlestick_chart(df, cost_basis=None):
     fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_20'], name="EMA 20", line=dict(color='#00FF00', width=1.5)), row=1, col=1)
     fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_50'], name="EMA 50", line=dict(color='#FFA500', width=1.5)), row=1, col=1)
     fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_200'], name="EMA 200", line=dict(color='#FF0000', width=1.5)), row=1, col=1)
+
+    # S/R levels
+    supports, resistances = find_support_resistance(df)
+    for i, s in enumerate(supports):
+        fig.add_hline(
+            y=s, line_dash="dot", line_color="#00FF00", line_width=1,
+            annotation_text=f"S{i+1} ${s:.2f}",
+            annotation_font_color="#00FF00", annotation_font_size=10,
+            row=1, col=1,
+        )
+    for i, r in enumerate(resistances):
+        fig.add_hline(
+            y=r, line_dash="dot", line_color="#FF4136", line_width=1,
+            annotation_text=f"R{i+1} ${r:.2f}",
+            annotation_font_color="#FF4136", annotation_font_size=10,
+            row=1, col=1,
+        )
 
     colors = ['#00FF00' if v >= 0 else '#FF0000' for v in df['Hist']]
     fig.add_trace(go.Bar(x=df['Date'], y=df['Hist'], name="Histogram", marker_color=colors), row=2, col=1)

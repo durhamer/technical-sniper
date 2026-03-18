@@ -4,6 +4,10 @@ from datetime import date
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from data import get_stock_data, get_earnings_date
+from config import (
+    MIN_EMA200_DATAPOINTS, DEFAULT_DAYS_TO_EARNINGS,
+    EARNINGS_CRITICAL_DAYS, EARNINGS_WARNING_DAYS,
+)
 
 
 def _fetch_radar_row(row):
@@ -16,7 +20,7 @@ def _fetch_radar_row(row):
     e_date = get_earnings_date(t)
 
     dist_pct = 0
-    if df_t is not None and len(df_t) > 200:
+    if df_t is not None and len(df_t) > MIN_EMA200_DATAPOINTS:
         p = df_t['Close'].iloc[-1]
         ema200 = df_t['EMA_200'].iloc[-1]
         prev_ema200 = df_t['EMA_200'].iloc[-2]
@@ -37,7 +41,7 @@ def _fetch_radar_row(row):
 
     pl_pct = ((p - c) / c * 100) if c > 0 else 0
 
-    days_left = 999
+    days_left = DEFAULT_DAYS_TO_EARNINGS
     e_str = "N/A"
     if e_date:
         try:
@@ -86,9 +90,9 @@ def render_radar(portfolio_df):
                 def color_earnings(val):
                     if '(' in str(val):
                         days = int(str(val).split('(')[1].split('d')[0])
-                        if days <= 7:
+                        if days <= EARNINGS_CRITICAL_DAYS:
                             return 'background-color: #8B0000; color: white'
-                        if days <= 14:
+                        if days <= EARNINGS_WARNING_DAYS:
                             return 'background-color: #B8860B; color: white'
                     return ''
 
