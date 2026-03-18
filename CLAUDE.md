@@ -12,7 +12,12 @@
 - **No local development** — all code changes go through GitHub directly
 
 ## Architecture
-- `app.py` — single-file Streamlit app, everything lives here
+- `app.py` — entry point: page config, sidebar navigation, tab routing, portfolio editor
+- `gas_client.py` — Google Apps Script integration (load/save portfolio to Google Sheets)
+- `data.py` — all `@st.cache_data` fetcher functions + ticker mapping
+- `analysis.py` — pure computation: S/R detection, AI judgment badge logic (no UI)
+- `ui_radar.py` — Macro Radar view (parallel fetch + styled table)
+- `ui_stock.py` — single stock analysis view (info cards, S/R card, charts, tabs)
 - `requirements.txt` — pip dependencies for Streamlit Cloud
 - Portfolio data is stored in Google Sheets via a GAS webhook (`GAS_URL`)
 - Data is cached using `@st.cache_data` with TTLs (300s for prices, 86400s for fundamentals)
@@ -27,7 +32,7 @@
 ## Coding Conventions
 - UI labels and user-facing text: **Traditional Chinese (繁體中文)**
 - Code comments and variable names: **English**
-- Single-file architecture — do NOT split into multiple modules
+- Modular architecture — `app.py` is the slim entry point, logic is split by concern into separate modules
 - Use `@st.cache_data` for all API calls with appropriate TTL
 - Plotly charts use `template="plotly_dark"`
 - All yfinance calls should handle empty/missing data gracefully (try/except, null checks)
@@ -46,10 +51,11 @@ These shortcuts are supported in the app:
 - Make sure S/R levels render on the candlestick chart
 
 ## Common Tasks
-- **Adding a new indicator**: compute it in `get_stock_data()`, add to chart in the `tab_tech` section
-- **Adding a new info card**: add a new `st.container(border=True)` block in the 2x2 grid area
-- **Adding a new judgment badge**: append to the `judgments` list with 🟢/🔴/🟡 prefix
-- **Adding a new data tab**: add to the `st.tabs()` call and create a `with tab_xxx:` block
+- **Adding a new indicator**: compute it in `get_stock_data()` in `data.py`, add to chart in `_render_chart()` in `ui_stock.py`
+- **Adding a new info card**: add a new `st.container(border=True)` block in `_render_info_cards()` in `ui_stock.py`
+- **Adding a new judgment badge**: add logic in `compute_judgments()` in `analysis.py`
+- **Adding a new data tab**: add to `st.tabs()` in `render_stock_view()` in `ui_stock.py`
+- **Adding a new data fetcher**: add `@st.cache_data` function in `data.py`
 
 ## Dependencies
 All listed in `requirements.txt`. When adding a new library, always update `requirements.txt` — Streamlit Cloud installs from it on every deploy.
