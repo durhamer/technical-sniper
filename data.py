@@ -11,9 +11,9 @@ TICKER_MAPPING = {
 def get_stock_data(ticker, period="2y"):
     target_ticker = TICKER_MAPPING.get(ticker.upper(), ticker)
     try:
-        df = yf.download(target_ticker, period=period, progress=False)
+        tk = yf.Ticker(target_ticker)
+        df = tk.history(period=period)
         if df.empty: return None
-        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
         df = df.reset_index()
         df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
