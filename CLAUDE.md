@@ -12,7 +12,12 @@
 - **No local development** — all code changes go through GitHub directly
 
 ## Architecture
-- `app.py` — single-file Streamlit app, everything lives here
+- `app.py` — main entry point: page config, sidebar navigation, tab routing
+- `data.py` — all data-fetching functions (`get_stock_data`, `get_shares_data`, `get_earnings_date`, `get_smart_money_data`, `get_institutional_holders`), cached with `@st.cache_data`
+- `portfolio.py` — Google Sheets integration (`load_portfolio`, `save_portfolio`, `GAS_URL`)
+- `charts.py` — Plotly chart builders (`build_candlestick_chart`, `build_buyback_chart`)
+- `views/radar.py` — Macro Radar overview (`render_radar`)
+- `views/analysis.py` — single-stock tactical analysis (`render_analysis`)
 - `requirements.txt` — pip dependencies for Streamlit Cloud
 - Portfolio data is stored in Google Sheets via a GAS webhook (`GAS_URL`)
 - Data is cached using `@st.cache_data` with TTLs (300s for prices, 86400s for fundamentals)
@@ -27,7 +32,7 @@
 ## Coding Conventions
 - UI labels and user-facing text: **Traditional Chinese (繁體中文)**
 - Code comments and variable names: **English**
-- Single-file architecture — do NOT split into multiple modules
+- Modular architecture — each concern in its own file (see Architecture section)
 - Use `@st.cache_data` for all API calls with appropriate TTL
 - Plotly charts use `template="plotly_dark"`
 - All yfinance calls should handle empty/missing data gracefully (try/except, null checks)
@@ -46,10 +51,11 @@ These shortcuts are supported in the app:
 - Make sure S/R levels render on the candlestick chart
 
 ## Common Tasks
-- **Adding a new indicator**: compute it in `get_stock_data()`, add to chart in the `tab_tech` section
-- **Adding a new info card**: add a new `st.container(border=True)` block in the 2x2 grid area
-- **Adding a new judgment badge**: append to the `judgments` list with 🟢/🔴/🟡 prefix
-- **Adding a new data tab**: add to the `st.tabs()` call and create a `with tab_xxx:` block
+- **Adding a new indicator**: compute it in `data.py:get_stock_data()`, add to chart in `charts.py`
+- **Adding a new info card**: add a new `st.container(border=True)` block in `views/analysis.py`
+- **Adding a new judgment badge**: append to the `judgments` list in `views/analysis.py`
+- **Adding a new data tab**: add to the `st.tabs()` call in `views/analysis.py`
+- **Adding a new view**: create a new file in `views/`, import and route from `app.py`
 
 ## Dependencies
 All listed in `requirements.txt`. When adding a new library, always update `requirements.txt` — Streamlit Cloud installs from it on every deploy.
