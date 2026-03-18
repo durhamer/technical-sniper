@@ -1,24 +1,23 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
 from datetime import date
 
-from data import get_earnings_date, TICKER_MAPPING
+from data import get_stock_data, get_earnings_date
 
 
-def _process_radar_row(row, ticker_data):
-    """Process a single radar row using pre-fetched batch data."""
+def _build_radar_row(row):
+    """Build a single radar row by fetching data sequentially (main thread, cache-safe)."""
     t = row['Ticker']
     c = row['Cost']
     stock_type = "💰" if row['Type'] == 'Holding' else "👀"
 
+    df_t = get_stock_data(t, period="2y")
     e_date = get_earnings_date(t)
 
     dist_pct = 0
     ema_info = "計算中..."
     p = 0
 
-    df_t = ticker_data.get(t)
     if df_t is not None and len(df_t) > 200:
         p = df_t['Close'].iloc[-1]
         ema200 = df_t['EMA_200'].iloc[-1]
@@ -57,47 +56,8 @@ def _process_radar_row(row, ticker_data):
     }
 
 
-@st.cache_data(ttl=300)
-def _batch_download(tickers_tuple):
-    """Batch download all tickers in one yf.download call (thread-safe)."""
-    tickers_list = list(tickers_tuple)
-    # Map display tickers to yfinance tickers
-    yf_tickers = [TICKER_MAPPING.get(t.upper(), t) for t in tickers_list]
-
-    try:
-        raw = yf.download(yf_tickers, period="2y", progress=False, group_by='ticker')
-    except:
-        return {}
-
-    result = {}
-    for orig_t, yf_t in zip(tickers_list, yf_tickers):
-        try:
-            if len(yf_tickers) == 1:
-                df = raw.copy()
-            else:
-                df = raw[yf_t].copy()
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
-            df = df.dropna(how='all')
-            if df.empty:
-                continue
-            df = df.reset_index()
-            df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
-            df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
-            df['EMA_200'] = df['Close'].ewm(span=200, adjust=False).mean()
-            exp1 = df['Close'].ewm(span=12, adjust=False).mean()
-            exp2 = df['Close'].ewm(span=26, adjust=False).mean()
-            df['MACD'] = exp1 - exp2
-            df['Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
-            df['Hist'] = df['MACD'] - df['Signal']
-            result[orig_t] = df
-        except:
-            continue
-    return result
-
-
 def render_radar(portfolio_df):
-    """Render the Macro Radar view with batch data fetching."""
+    """Render the Macro Radar view with sequential cached fetching."""
     st.markdown("### 📡 全球戰術雷達 (Global Tactical Radar)")
     st.caption("同步掃描「持倉」與「關注」標的，監控 EMA 200 位階與財報倒數。")
 
@@ -106,15 +66,11 @@ def render_radar(portfolio_df):
         st.info("尚無紀錄，請至「庫存管理」新增！")
         return
 
-    with st.spinner("📡 批次掃描中 (Batch Fetch)..."):
-        # Batch download all tickers at once (thread-safe, cacheable)
-        all_tickers = tuple(all_targets['Ticker'].tolist())
-        ticker_data = _batch_download(all_tickers)
-
+    with st.spinner("📡 掃描中..."):
         radar_data = []
         for _, row in all_targets.iterrows():
             try:
-                result = _process_radar_row(row, ticker_data)
+                result = _build_radar_row(row)
                 radar_data.append(result)
             except:
                 radar_data.append({
