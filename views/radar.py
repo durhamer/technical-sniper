@@ -1,22 +1,13 @@
 import streamlit as st
 import pandas as pd
-import threading
 from datetime import date
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
+# 移除了 threading 和 concurrent.futures 相關的 import
 from data import get_stock_data, get_earnings_date
 from config import (
     MIN_EMA200_DATAPOINTS, DEFAULT_DAYS_TO_EARNINGS,
     EARNINGS_CRITICAL_DAYS, EARNINGS_WARNING_DAYS,
 )
-
-
-def _fetch_with_ctx(fn, ctx, *args):
-    """Run a function in a worker thread with Streamlit's script context."""
-    add_script_run_ctx(threading.current_thread(), ctx)
-    return fn(*args)
-
 
 def _fetch_radar_row(row):
     """Fetch data for a single ticker and return a radar row dict."""
@@ -87,17 +78,15 @@ def render_radar(portfolio_df):
         st.info("尚無紀錄，請至「庫存管理」新增！")
         return
 
-    with st.spinner("📡 正在並行計算 EMA 200 乖離度與財報時程..."):
-        rows = [row for _, row in all_targets.iterrows()]
+    # 改成單純的 for 迴圈循序抓取
+    with st.spinner("📡 正在掃描雷達訊號 (循序加載中)..."):
         radar_data = []
-        ctx = get_script_run_ctx()
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = {executor.submit(_fetch_with_ctx, _fetch_radar_row, ctx, row): row for row in rows}
-            for future in as_completed(futures):
-                try:
-                    radar_data.append(future.result())
-                except:
-                    pass
+        for _, row in all_targets.iterrows():
+            try:
+                row_data = _fetch_radar_row(row)
+                radar_data.append(row_data)
+            except:
+                pass # 保持你原本的容錯風格
 
         if radar_data:
             radar_df = pd.DataFrame(radar_data).sort_values("_days")
