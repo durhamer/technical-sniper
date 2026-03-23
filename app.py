@@ -75,6 +75,31 @@ with tab1:
             st.divider()
             st.link_button("📊 查看 DIX / GEX (暗池)", "https://squeezemetrics.com/monitor/dix")
 
+        st.divider()
+        with st.expander("🔧 資料源診斷"):
+            test_ticker = st.text_input("測試代碼", value="AAPL", key="diag_ticker")
+            if st.button("🩺 測試連線"):
+                from data import get_stock_data
+                import time
+                start = time.time()
+                with st.spinner("正在連線 Yahoo Finance..."):
+                    test_df = get_stock_data(test_ticker, period="5d")
+                elapsed = time.time() - start
+                if test_df is not None and not test_df.empty:
+                    latest = test_df.iloc[-1]
+                    st.success(f"連線正常 ({elapsed:.1f}s)")
+                    st.code(
+                        f"代碼: {test_ticker}\n"
+                        f"日期: {latest['Date'].strftime('%Y-%m-%d')}\n"
+                        f"收盤: ${latest['Close']:.2f}\n"
+                        f"最高: ${latest['High']:.2f}\n"
+                        f"最低: ${latest['Low']:.2f}\n"
+                        f"成交量: {latest['Volume']:,.0f}",
+                        language=None,
+                    )
+                else:
+                    st.error(f"連線失敗或無資料 ({elapsed:.1f}s)\n代碼 `{test_ticker}` 可能無效，或 Yahoo Finance 無回應。")
+
     # Route to the appropriate view
     if not selected_ticker:
         render_radar(portfolio_df)

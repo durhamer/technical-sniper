@@ -1,7 +1,14 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import numpy as np
 from datetime import date
+
+from config import (
+    EMA_FAST, EMA_MID, EMA_SLOW,
+    MACD_FAST, MACD_SLOW, MACD_SIGNAL,
+    SR_ROLLING_WINDOW, SR_PROXIMITY_PCT,
+)
 
 TICKER_MAPPING = {
     "SOX": "^SOX", "NDX": "^NDX", "DJI": "^DJI", "GSPC": "^GSPC",
@@ -14,24 +21,30 @@ def _is_index_or_crypto(ticker):
 
 
 @st.cache_data(ttl=300)
-def get_stock_data(ticker, period="2y"):
+def _fetch_stock_data(ticker, period="2y"):
+    """Internal cached fetch — raises on failure so Streamlit won't cache None."""
     target_ticker = TICKER_MAPPING.get(ticker.upper(), ticker)
+    df = yf.download(target_ticker, period=period, progress=False)
+    if df.empty:
+        raise LookupError(f"No data for {ticker}")
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    df = df.reset_index()
+    df['EMA_20'] = df['Close'].ewm(span=EMA_FAST, adjust=False).mean()
+    df['EMA_50'] = df['Close'].ewm(span=EMA_MID, adjust=False).mean()
+    df['EMA_200'] = df['Close'].ewm(span=EMA_SLOW, adjust=False).mean()
+    exp1 = df['Close'].ewm(span=MACD_FAST, adjust=False).mean()
+    exp2 = df['Close'].ewm(span=MACD_SLOW, adjust=False).mean()
+    df['MACD'] = exp1 - exp2
+    df['Signal'] = df['MACD'].ewm(span=MACD_SIGNAL, adjust=False).mean()
+    df['Hist'] = df['MACD'] - df['Signal']
+    return df
+
+
+def get_stock_data(ticker, period="2y"):
+    """Public wrapper — returns None on failure (never cached as None)."""
     try:
-        df = yf.download(target_ticker, period=period, progress=False)
-        if df.empty:
-            return None
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        df = df.reset_index()
-        df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
-        df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
-        df['EMA_200'] = df['Close'].ewm(span=200, adjust=False).mean()
-        exp1 = df['Close'].ewm(span=12, adjust=False).mean()
-        exp2 = df['Close'].ewm(span=26, adjust=False).mean()
-        df['MACD'] = exp1 - exp2
-        df['Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
-        df['Hist'] = df['MACD'] - df['Signal']
-        return df
+        return _fetch_stock_data(ticker, period)
     except:
         return None
 
@@ -111,3 +124,41 @@ def get_institutional_holders(ticker):
     except:
         pass
     return None
+
+
+def find_support_resistance(df, window=SR_ROLLING_WINDOW, proximity_pct=SR_PROXIMITY_PCT):
+    """Find key S/R levels using rolling pivot highs/lows."""
+    try:
+        highs = df['High'].rolling(window, center=True).max()
+        lows = df['Low'].rolling(window, center=True).min()
+
+        pivot_highs = df.loc[df['High'] == highs, 'High'].unique()
+        pivot_lows = df.loc[df['Low'] == lows, 'Low'].unique()
+
+        all_levels = sorted(set(list(pivot_highs) + list(pivot_lows)))
+
+        # Cluster nearby levels by proximity
+        clustered = []
+        for level in all_levels:
+            if np.isnan(level):
+                continue
+            merged = False
+            for i, (cl, count) in enumerate(clustered):
+                if abs(level - cl) / cl < proximity_pct / 100:
+                    clustered[i] = ((cl * count + level) / (count + 1), count + 1)
+                    merged = True
+                    break
+            if not merged:
+                clustered.append((level, 1))
+
+        # Sort by touch count (strength)
+        clustered.sort(key=lambda x: x[1], reverse=True)
+        levels = [c[0] for c in clustered]
+
+        current_price = df['Close'].iloc[-1]
+        supports = sorted([l for l in levels if l < current_price], reverse=True)[:2]
+        resistances = sorted([l for l in levels if l > current_price])[:2]
+
+        return supports, resistances
+    except:
+        return [], []

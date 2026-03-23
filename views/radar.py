@@ -1,10 +1,13 @@
 import streamlit as st
 import pandas as pd
 from datetime import date
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# 移除了 threading 和 concurrent.futures 相關的 import
 from data import get_stock_data, get_earnings_date
-
+from config import (
+    MIN_EMA200_DATAPOINTS, DEFAULT_DAYS_TO_EARNINGS,
+    EARNINGS_CRITICAL_DAYS, EARNINGS_WARNING_DAYS,
+)
 
 def _fetch_radar_row(row):
     """Fetch data for a single ticker and return a radar row dict."""
@@ -15,29 +18,36 @@ def _fetch_radar_row(row):
     df_t = get_stock_data(t, period="2y")
     e_date = get_earnings_date(t)
 
+    # 預設值
+    p = 0
     dist_pct = 0
-    if df_t is not None and len(df_t) > 200:
+    ema_info = "計算中..."
+
+    # 第一優先：只要 df_t 不是 None 且不為空，就絕對要把價格抓出來！
+    if df_t is not None and not df_t.empty:
         p = df_t['Close'].iloc[-1]
-        ema200 = df_t['EMA_200'].iloc[-1]
-        prev_ema200 = df_t['EMA_200'].iloc[-2]
-        prev_p = df_t['Close'].iloc[-2]
+        
+        # 第二層判斷：資料夠長才計算 EMA 200 乖離
+        if len(df_t) > MIN_EMA200_DATAPOINTS:
+            ema200 = df_t['EMA_200'].iloc[-1]
+            prev_ema200 = df_t['EMA_200'].iloc[-2]
+            prev_p = df_t['Close'].iloc[-2]
 
-        dist_pct = ((p - ema200) / ema200) * 100
-        prev_dist_pct = ((prev_p - prev_ema200) / prev_ema200) * 100
+            dist_pct = ((p - ema200) / ema200) * 100
+            prev_dist_pct = ((prev_p - prev_ema200) / prev_ema200) * 100
 
-        if abs(dist_pct) > abs(prev_dist_pct):
-            trend = "↗️ 擴張" if dist_pct > 0 else "↘️ 遠離"
+            if abs(dist_pct) > abs(prev_dist_pct):
+                trend = "↗️ 擴張" if dist_pct > 0 else "↘️ 遠離"
+            else:
+                trend = "➡️ 修正" if dist_pct > 0 else "⤴️ 回歸"
+
+            ema_info = f"{dist_pct:+.1f}% ({trend})"
         else:
-            trend = "➡️ 修正" if dist_pct > 0 else "⤴️ 回歸"
-
-        ema_info = f"{dist_pct:+.1f}% ({trend})"
-    else:
-        p = 0
-        ema_info = "計算中..."
+            ema_info = "資料不足 (上市過短)"
 
     pl_pct = ((p - c) / c * 100) if c > 0 else 0
 
-    days_left = 999
+    days_left = DEFAULT_DAYS_TO_EARNINGS
     e_str = "N/A"
     if e_date:
         try:
@@ -68,16 +78,15 @@ def render_radar(portfolio_df):
         st.info("尚無紀錄，請至「庫存管理」新增！")
         return
 
-    with st.spinner("📡 正在並行計算 EMA 200 乖離度與財報時程..."):
-        rows = [row for _, row in all_targets.iterrows()]
+    # 改成單純的 for 迴圈循序抓取
+    with st.spinner("📡 正在掃描雷達訊號 (循序加載中)..."):
         radar_data = []
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = {executor.submit(_fetch_radar_row, row): row for row in rows}
-            for future in as_completed(futures):
-                try:
-                    radar_data.append(future.result())
-                except:
-                    pass
+        for _, row in all_targets.iterrows():
+            try:
+                row_data = _fetch_radar_row(row)
+                radar_data.append(row_data)
+            except:
+                pass # 保持你原本的容錯風格
 
         if radar_data:
             radar_df = pd.DataFrame(radar_data).sort_values("_days")
@@ -86,9 +95,9 @@ def render_radar(portfolio_df):
                 def color_earnings(val):
                     if '(' in str(val):
                         days = int(str(val).split('(')[1].split('d')[0])
-                        if days <= 7:
+                        if days <= EARNINGS_CRITICAL_DAYS:
                             return 'background-color: #8B0000; color: white'
-                        if days <= 14:
+                        if days <= EARNINGS_WARNING_DAYS:
                             return 'background-color: #B8860B; color: white'
                     return ''
 
