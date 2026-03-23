@@ -2,12 +2,12 @@ import streamlit as st
 import pandas as pd
 from datetime import date
 
-# 移除了 threading 和 concurrent.futures 相關的 import
 from data import get_stock_data, get_earnings_date
 from config import (
     MIN_EMA200_DATAPOINTS, DEFAULT_DAYS_TO_EARNINGS,
     EARNINGS_CRITICAL_DAYS, EARNINGS_WARNING_DAYS,
 )
+
 
 def _fetch_radar_row(row):
     """Fetch data for a single ticker and return a radar row dict."""
@@ -18,16 +18,15 @@ def _fetch_radar_row(row):
     df_t = get_stock_data(t, period="2y")
     e_date = get_earnings_date(t)
 
-    # 預設值
     p = 0
     dist_pct = 0
     ema_info = "計算中..."
 
-    # 第一優先：只要 df_t 不是 None 且不為空，就絕對要把價格抓出來！
+    # First priority: extract price as long as we have ANY data
     if df_t is not None and not df_t.empty:
         p = df_t['Close'].iloc[-1]
-        
-        # 第二層判斷：資料夠長才計算 EMA 200 乖離
+
+        # Only compute EMA 200 divergence if we have enough data points
         if len(df_t) > MIN_EMA200_DATAPOINTS:
             ema200 = df_t['EMA_200'].iloc[-1]
             prev_ema200 = df_t['EMA_200'].iloc[-2]
@@ -78,7 +77,6 @@ def render_radar(portfolio_df):
         st.info("尚無紀錄，請至「庫存管理」新增！")
         return
 
-    # 改成單純的 for 迴圈循序抓取
     with st.spinner("📡 正在掃描雷達訊號 (循序加載中)..."):
         radar_data = []
         for _, row in all_targets.iterrows():
@@ -86,7 +84,7 @@ def render_radar(portfolio_df):
                 row_data = _fetch_radar_row(row)
                 radar_data.append(row_data)
             except:
-                pass # 保持你原本的容錯風格
+                pass
 
         if radar_data:
             radar_df = pd.DataFrame(radar_data).sort_values("_days")
