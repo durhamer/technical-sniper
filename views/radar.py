@@ -1,13 +1,21 @@
 import streamlit as st
 import pandas as pd
+import threading
 from datetime import date
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
 from data import get_stock_data, get_earnings_date
 from config import (
     MIN_EMA200_DATAPOINTS, DEFAULT_DAYS_TO_EARNINGS,
     EARNINGS_CRITICAL_DAYS, EARNINGS_WARNING_DAYS,
 )
+
+
+def _fetch_with_ctx(fn, ctx, *args):
+    """Run a function in a worker thread with Streamlit's script context."""
+    add_script_run_ctx(threading.current_thread(), ctx)
+    return fn(*args)
 
 
 def _fetch_radar_row(row):
@@ -75,8 +83,9 @@ def render_radar(portfolio_df):
     with st.spinner("📡 正在並行計算 EMA 200 乖離度與財報時程..."):
         rows = [row for _, row in all_targets.iterrows()]
         radar_data = []
+        ctx = get_script_run_ctx()
         with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = {executor.submit(_fetch_radar_row, row): row for row in rows}
+            futures = {executor.submit(_fetch_with_ctx, _fetch_radar_row, ctx, row): row for row in rows}
             for future in as_completed(futures):
                 try:
                     radar_data.append(future.result())
