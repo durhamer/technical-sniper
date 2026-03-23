@@ -85,19 +85,37 @@ def get_shares_data(ticker):
 
 
 @st.cache_data(ttl=86400)
-def get_earnings_date(ticker):
+def _fetch_earnings_date(ticker):
+    """Internal cached fetch — raises on failure so None is never cached."""
     if _is_index_or_crypto(ticker):
-        return None
+        return None  # Intentional None for indices/crypto — safe to cache
+    tk = yf.Ticker(ticker)
+    cal = tk.calendar
+    if cal is None:
+        raise LookupError(f"No calendar for {ticker}")
+    # cal can be a dict OR a DataFrame depending on yfinance version
+    if isinstance(cal, dict):
+        dates = cal.get('Earnings Date', [])
+    elif isinstance(cal, pd.DataFrame):
+        if 'Earnings Date' in cal.columns:
+            dates = cal['Earnings Date'].tolist()
+        elif 'Earnings Date' in cal.index:
+            dates = cal.loc['Earnings Date'].tolist()
+        else:
+            dates = []
+    else:
+        dates = []
+    if dates and len(dates) > 0:
+        return dates[0]
+    raise LookupError(f"No earnings date for {ticker}")
+
+
+def get_earnings_date(ticker):
+    """Public wrapper — returns None on failure (never cached as None)."""
     try:
-        tk = yf.Ticker(ticker)
-        cal = tk.calendar
-        if cal is not None and 'Earnings Date' in cal:
-            dates = cal['Earnings Date']
-            if isinstance(dates, list) and len(dates) > 0:
-                return dates[0]
+        return _fetch_earnings_date(ticker)
     except:
-        pass
-    return None
+        return None
 
 
 @st.cache_data(ttl=86400)
