@@ -100,6 +100,25 @@ with tab1:
                 else:
                     st.error(f"連線失敗或無資料 ({elapsed:.1f}s)\n代碼 `{test_ticker}` 可能無效，或 Yahoo Finance 無回應。")
 
+            if st.button("📅 抓取財報日期"):
+                import yfinance as yf
+                with st.spinner("正在查詢財報日期..."):
+                    try:
+                        tk = yf.Ticker(test_ticker)
+                        cal = tk.calendar
+                        st.write("**原始 calendar 類型：**", type(cal).__name__)
+                        st.write("**原始 calendar 內容：**")
+                        st.write(cal)
+
+                        from data import get_earnings_date
+                        parsed = get_earnings_date(test_ticker)
+                        if parsed:
+                            st.success(f"解析結果：{parsed}")
+                        else:
+                            st.warning("解析結果：None（函式未能取得日期）")
+                    except Exception as e:
+                        st.error(f"抓取失敗：{e}")
+
     # Route to the appropriate view
     if not selected_ticker:
         render_radar(portfolio_df)
