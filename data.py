@@ -21,24 +21,30 @@ def _is_index_or_crypto(ticker):
 
 
 @st.cache_data(ttl=300)
-def get_stock_data(ticker, period="2y"):
+def _fetch_stock_data(ticker, period="2y"):
+    """Internal cached fetch — raises on failure so Streamlit won't cache None."""
     target_ticker = TICKER_MAPPING.get(ticker.upper(), ticker)
+    df = yf.download(target_ticker, period=period, progress=False)
+    if df.empty:
+        raise LookupError(f"No data for {ticker}")
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    df = df.reset_index()
+    df['EMA_20'] = df['Close'].ewm(span=EMA_FAST, adjust=False).mean()
+    df['EMA_50'] = df['Close'].ewm(span=EMA_MID, adjust=False).mean()
+    df['EMA_200'] = df['Close'].ewm(span=EMA_SLOW, adjust=False).mean()
+    exp1 = df['Close'].ewm(span=MACD_FAST, adjust=False).mean()
+    exp2 = df['Close'].ewm(span=MACD_SLOW, adjust=False).mean()
+    df['MACD'] = exp1 - exp2
+    df['Signal'] = df['MACD'].ewm(span=MACD_SIGNAL, adjust=False).mean()
+    df['Hist'] = df['MACD'] - df['Signal']
+    return df
+
+
+def get_stock_data(ticker, period="2y"):
+    """Public wrapper — returns None on failure (never cached as None)."""
     try:
-        df = yf.download(target_ticker, period=period, progress=False)
-        if df.empty:
-            return None
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        df = df.reset_index()
-        df['EMA_20'] = df['Close'].ewm(span=EMA_FAST, adjust=False).mean()
-        df['EMA_50'] = df['Close'].ewm(span=EMA_MID, adjust=False).mean()
-        df['EMA_200'] = df['Close'].ewm(span=EMA_SLOW, adjust=False).mean()
-        exp1 = df['Close'].ewm(span=MACD_FAST, adjust=False).mean()
-        exp2 = df['Close'].ewm(span=MACD_SLOW, adjust=False).mean()
-        df['MACD'] = exp1 - exp2
-        df['Signal'] = df['MACD'].ewm(span=MACD_SIGNAL, adjust=False).mean()
-        df['Hist'] = df['MACD'] - df['Signal']
-        return df
+        return _fetch_stock_data(ticker, period)
     except:
         return None
 
