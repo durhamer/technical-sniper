@@ -27,25 +27,32 @@ def _fetch_radar_row(row):
     df_t = get_stock_data(t, period="2y")
     e_date = get_earnings_date(t)
 
+    # 預設值
+    p = 0
     dist_pct = 0
-    if df_t is not None and len(df_t) > MIN_EMA200_DATAPOINTS:
+    ema_info = "計算中..."
+
+    # 第一優先：只要 df_t 不是 None 且不為空，就絕對要把價格抓出來！
+    if df_t is not None and not df_t.empty:
         p = df_t['Close'].iloc[-1]
-        ema200 = df_t['EMA_200'].iloc[-1]
-        prev_ema200 = df_t['EMA_200'].iloc[-2]
-        prev_p = df_t['Close'].iloc[-2]
+        
+        # 第二層判斷：資料夠長才計算 EMA 200 乖離
+        if len(df_t) > MIN_EMA200_DATAPOINTS:
+            ema200 = df_t['EMA_200'].iloc[-1]
+            prev_ema200 = df_t['EMA_200'].iloc[-2]
+            prev_p = df_t['Close'].iloc[-2]
 
-        dist_pct = ((p - ema200) / ema200) * 100
-        prev_dist_pct = ((prev_p - prev_ema200) / prev_ema200) * 100
+            dist_pct = ((p - ema200) / ema200) * 100
+            prev_dist_pct = ((prev_p - prev_ema200) / prev_ema200) * 100
 
-        if abs(dist_pct) > abs(prev_dist_pct):
-            trend = "↗️ 擴張" if dist_pct > 0 else "↘️ 遠離"
+            if abs(dist_pct) > abs(prev_dist_pct):
+                trend = "↗️ 擴張" if dist_pct > 0 else "↘️ 遠離"
+            else:
+                trend = "➡️ 修正" if dist_pct > 0 else "⤴️ 回歸"
+
+            ema_info = f"{dist_pct:+.1f}% ({trend})"
         else:
-            trend = "➡️ 修正" if dist_pct > 0 else "⤴️ 回歸"
-
-        ema_info = f"{dist_pct:+.1f}% ({trend})"
-    else:
-        p = 0
-        ema_info = "計算中..."
+            ema_info = "資料不足 (上市過短)"
 
     pl_pct = ((p - c) / c * 100) if c > 0 else 0
 
